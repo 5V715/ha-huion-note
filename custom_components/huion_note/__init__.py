@@ -26,5 +26,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: HuionNoteConfigEntry) -
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: HuionNoteConfigEntry) -> None:
+    """Delete the stored sync state and any repair issue. Saved page files stay."""
+    await HuionNoteCoordinator(hass, entry).async_remove_storage()
+
+
 async def _async_reload(hass: HomeAssistant, entry: HuionNoteConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)

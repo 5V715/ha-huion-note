@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from bleak.exc import BleakError
@@ -20,6 +20,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -49,7 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 MAX_KNOWN_PAGES = 5000
-SYNC_TIMEOUT = 15 * 60  # seconds; a full 64-page notebook fits comfortably
+STALE_ADVERTISEMENT = 30  # seconds; older advertisements are replays from the cache
 
 
 @dataclass
@@ -83,8 +84,10 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
         )
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
-        self._last_success = 0.0  # time.monotonic() stamps
-        self._last_failure = 0.0
+        self._last_failure = 0.0  # time.monotonic() stamp
+        # Set when the tablet rejects the handshake (PIN missing/wrong). Automatic
+        # syncs stay paused until the entry reloads, i.e. the user saves new options.
+        self._auth_problem = False
         self.data = HuionNoteData()
 
     # --- options -----------------------------------------------------------------
@@ -108,6 +111,11 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
         if stored.get("last_sync"):
             d.last_sync = dt_util.parse_datetime(stored["last_sync"])
         self.data = d
+
+    async def async_remove_storage(self) -> None:
+        """Forget this entry's saved state and its repair issue (entry deleted)."""
+        await self._store.async_remove()
+        ir.async_delete_issue(self.hass, DOMAIN, self._auth_issue_id)
 
     async def _async_save(self) -> None:
         raw = asdict(self.data)
@@ -139,11 +147,18 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
     ) -> None:
         if self._task and not self._task.done():
             return
-        now = time.monotonic()
-        cooldown = self._opts.get(CONF_COOLDOWN, DEFAULT_COOLDOWN) * 60
-        if self._last_success and now - self._last_success < cooldown:
+        if self._auth_problem:
             return
-        if self._last_failure and now - self._last_failure < FAILURE_BACKOFF:
+        # On (re)registration the bluetooth manager replays the last cached
+        # advertisement; only a fresh one means the tablet is awake right now.
+        if bluetooth.MONOTONIC_TIME() - service_info.time > STALE_ADVERTISEMENT:
+            return
+        # Cooldown from the persisted last sync, so a restart or options reload
+        # doesn't sync again straight away.
+        cooldown = timedelta(minutes=self._opts.get(CONF_COOLDOWN, DEFAULT_COOLDOWN))
+        if self.data.last_sync and dt_util.utcnow() - self.data.last_sync < cooldown:
+            return
+        if self._last_failure and time.monotonic() - self._last_failure < FAILURE_BACKOFF:
             return
         _LOGGER.debug("%s: seen (rssi %s) — starting sync", self.address, service_info.rssi)
         self.async_request_sync()
@@ -175,9 +190,7 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
             return False
         async with self._lock:
             ok = await self._async_sync_locked()
-        if ok:
-            self._last_success = time.monotonic()
-        else:
+        if not ok:
             self._last_failure = time.monotonic()
         return ok
 
@@ -248,23 +261,28 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
         session = SyncSession(transport, pin=self._opts.get(CONF_PIN) or None)
         deleted = 0
         try:
-            async with asyncio.timeout(SYNC_TIMEOUT):
-                await transport.connect()
-                total = await session.run(on_page)
-                # Re-read the option: never delete on a setting the user just turned off.
-                if self._opts.get(CONF_DELETE_AFTER_SYNC, False):
-                    # Highest index first so the surviving indices can't shift. The
-                    # current page is skipped: strokes added after it was downloaded
-                    # would be lost.
-                    for idx in sorted(set(deletable) - {highest}, reverse=True):
-                        if await session.delete_page(idx):
-                            deleted += 1
-                        else:
-                            _LOGGER.warning("tablet did not confirm delete of page %d", idx + 1)
+            # No overall timeout: every step is bounded (connect retries, reply timeouts,
+            # a per-page deadline in SyncSession), and a fixed budget could never finish
+            # a large notebook over a slow proxy.
+            await transport.connect()
+            total = await session.run(on_page)
+            # Re-read the option: never delete on a setting the user just turned off.
+            if self._opts.get(CONF_DELETE_AFTER_SYNC, False):
+                # Highest index first so the surviving indices can't shift. The
+                # current page is skipped: strokes added after it was downloaded
+                # would be lost.
+                for idx in sorted(set(deletable) - {highest}, reverse=True):
+                    if await session.delete_page(idx):
+                        deleted += 1
+                    else:
+                        _LOGGER.warning("tablet did not confirm delete of page %d", idx + 1)
         except PinRequired:
-            return self._fail("tablet requires a PIN — set it in the integration options")
-        except AuthFailed as err:
-            return self._fail(f"authentication failed: {err}")
+            return self._auth_fail("the notebook requires a PIN")
+        except AuthFailed:
+            return self._auth_fail(
+                "the notebook rejected the PIN" if self._opts.get(CONF_PIN)
+                else "the notebook rejected the handshake"
+            )
         except (TransportClosed, BleakError, TimeoutError) as err:
             return self._fail(f"connection lost: {err or type(err).__name__}")
         except Exception as err:  # noqa: BLE001 — never leave the status stuck on "syncing"
@@ -298,8 +316,28 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
                 "files": [p.png for p in new_pages],
             },
         )
+        ir.async_delete_issue(self.hass, DOMAIN, self._auth_issue_id)
         self._set_status(STATUS_IDLE)
         return True
+
+    @property
+    def _auth_issue_id(self) -> str:
+        return f"auth_failed_{self.config_entry.entry_id}"
+
+    def _auth_fail(self, reason: str) -> bool:
+        """Pause automatic syncs and tell the user how to fix it, instead of
+        retrying a handshake that can't succeed every minute."""
+        self._auth_problem = True
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._auth_issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="auth_failed",
+            translation_placeholders={"name": self.config_entry.title, "reason": reason},
+        )
+        return self._fail(f"{reason} — set it in the integration options")
 
     def _fail(self, message: str) -> bool:
         _LOGGER.warning("%s: sync failed: %s", self.address, message)

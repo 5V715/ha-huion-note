@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -14,18 +15,21 @@ from homeassistant.components.bluetooth import BluetoothChange, BluetoothService
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_capture_events
 
 from custom_components.huion_note.const import (
     CONF_DELETE_AFTER_SYNC,
     CONF_OUTPUT_DIR,
+    CONF_PIN,
     DOMAIN,
     EVENT_PAGE_SAVED,
     EVENT_SYNC_FINISHED,
 )
 from custom_components.huion_note.protocol.frames import OrderCode
 
-from .conftest import FakeTablet, count, handshake, p87
+from .conftest import FakeTablet, count, handshake, p87, vr
 
 ADDRESS = "AA:BB:CC:DD:EE:FF"
 DEVICE = BLEDevice(ADDRESS, "Huion Note-X10", None)
@@ -283,3 +287,98 @@ async def test_not_in_range(hass: HomeAssistant, tmp_path) -> None:
     entry = await _setup(hass, tmp_path)
     assert not await entry.runtime_data.async_sync()
     assert "not in range" in entry.runtime_data.data.last_error
+
+
+def _store_key(entry):
+    return f"{DOMAIN}.{entry.entry_id}"
+
+
+async def _setup_with_last_sync(hass, hass_storage, tmp_path, minutes_ago):
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=ADDRESS, title="Huion Note-X10",
+                            data={CONF_ADDRESS: ADDRESS}, options={CONF_OUTPUT_DIR: str(tmp_path)})
+    entry.add_to_hass(hass)
+    last = dt_util.utcnow() - timedelta(minutes=minutes_ago)
+    hass_storage[_store_key(entry)] = {
+        "version": 1, "minor_version": 1, "key": _store_key(entry),
+        "data": {"last_sync": last.isoformat(), "known_pages": {}},
+    }
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+@pytest.mark.parametrize(("minutes_ago", "expect_sync"), [(1, False), (10, True)])
+async def test_restart_respects_cooldown(
+    hass: HomeAssistant, hass_storage, tmp_path, minutes_ago, expect_sync
+) -> None:
+    """Review finding: every restart/reload synced immediately."""
+    entry = await _setup_with_last_sync(hass, hass_storage, tmp_path, minutes_ago)
+    t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+    with t_patch as bt, d_patch:
+        entry.runtime_data._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert bt.called is expect_sync
+
+
+async def test_replayed_stale_advertisement_is_ignored(hass: HomeAssistant, tmp_path) -> None:
+    entry = await _setup(hass, tmp_path)
+    stale = service_info()
+    stale.time -= 120
+    t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+    with t_patch as bt, d_patch:
+        entry.runtime_data._async_handle_advertisement(stale, BluetoothChange.ADVERTISEMENT)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    bt.assert_not_called()
+
+
+def _pin_required():
+    return FakeTablet([handshake()[0], vr(2)])
+
+
+async def test_auth_failure_pauses_auto_sync_until_options_change(
+    hass: HomeAssistant, tmp_path, issue_registry: ir.IssueRegistry
+) -> None:
+    """Review finding: a missing/wrong PIN was retried every 60 s forever."""
+    entry = await _setup(hass, tmp_path)
+    issue_id = f"auth_failed_{entry.entry_id}"
+    t_patch, d_patch = _patch_tablet(_pin_required())
+    with t_patch, d_patch:
+        entry.runtime_data._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    entry.runtime_data._last_failure = 0.0  # backoff long over
+    t_patch, d_patch = _patch_tablet(_pin_required())
+    with t_patch as bt, d_patch:
+        entry.runtime_data._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    bt.assert_not_called()
+
+    # Saving options (with the PIN) reloads the entry and resumes syncing.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_PIN: "123456"})
+    await hass.async_block_till_done()
+    # challenge, "PIN needed", "PIN accepted", then the rest of a normal sync
+    ok = FakeTablet([handshake()[0], vr(2), vr(1), *THREE_PAGES[2:]])
+    t_patch, d_patch = _patch_tablet(ok)
+    with t_patch, d_patch:
+        entry.runtime_data._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data.data.status == "idle"
+    assert issue_registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_removing_entry_clears_issue_and_storage(
+    hass: HomeAssistant, hass_storage, tmp_path, issue_registry: ir.IssueRegistry
+) -> None:
+    entry = await _setup(hass, tmp_path)
+    t_patch, d_patch = _patch_tablet(_pin_required())
+    with t_patch, d_patch:
+        assert not await entry.runtime_data.async_sync()
+    await hass.async_block_till_done()
+    assert issue_registry.async_get_issue(DOMAIN, f"auth_failed_{entry.entry_id}")
+    assert _store_key(entry) in hass_storage
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert issue_registry.async_get_issue(DOMAIN, f"auth_failed_{entry.entry_id}") is None
+    assert _store_key(entry) not in hass_storage

@@ -4,7 +4,9 @@
     "step": {
       "user": {
         "description": "Pick the notebook. It must be awake and in range of a Bluetooth adapter or proxy.",
-        "data": { "address": "Device" }
+        "data": {
+          "address": "Device"
+        }
       },
       "bluetooth_confirm": {
         "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
@@ -31,19 +33,45 @@
         }
       }
     },
-    "error": { "invalid_pin": "The PIN must be exactly 6 digits." }
+    "error": {
+      "invalid_pin": "The PIN must be exactly 6 digits."
+    }
   },
   "entity": {
-    "button": { "sync": { "name": "Sync now" } },
-    "image": { "latest_page": { "name": "Latest page" } },
+    "button": {
+      "sync": {
+        "name": "Sync now"
+      }
+    },
+    "image": {
+      "latest_page": {
+        "name": "Latest page"
+      }
+    },
     "sensor": {
       "status": {
         "name": "Sync status",
-        "state": { "idle": "Idle", "syncing": "Syncing", "error": "Error" }
+        "state": {
+          "idle": "Idle",
+          "syncing": "Syncing",
+          "error": "Error"
+        }
       },
-      "last_sync": { "name": "Last sync" },
-      "pages_saved": { "name": "Pages saved" },
-      "battery": { "name": "Battery" }
+      "last_sync": {
+        "name": "Last sync"
+      },
+      "pages_saved": {
+        "name": "Pages saved"
+      },
+      "battery": {
+        "name": "Battery"
+      }
+    }
+  },
+  "issues": {
+    "auth_failed": {
+      "title": "{name} needs its PIN",
+      "description": "Home Assistant couldn't sign in to {name}: {reason}. Automatic syncs are paused. Open *Settings → Devices & services → Huion Note X10 → Configure*, enter the notebook's 6-digit PIN (or correct it) and save; syncing resumes the next time the notebook is seen."
     }
   }
 }

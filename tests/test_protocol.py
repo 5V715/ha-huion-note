@@ -1,6 +1,7 @@
 """Pure protocol tests (no Home Assistant needed beyond import path)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -124,3 +125,42 @@ def test_svg_output():
         'style="background:#fff"><path d="M18.1,21.2 L21.2,27.4 L24.3,33.6 L27.3,39.8" '
         'fill="none" stroke="#111" stroke-width="2.5"/></svg>'
     )
+
+
+async def test_trusts_page_count_beyond_64():
+    """Review finding: pages past index 63 were never scanned."""
+    script = handshake(pages=100) + [count(0)] * 70 + [count(1), p87(1)] + [count(0)] * 28 \
+        + [count(1), p87(1)] + [count(0)]
+    pages = []
+    assert await run(SyncSession(FakeTablet(script), idle_timeout=0.01), pages) == 2
+    assert [p.index for p in pages] == [70, 99]
+
+
+async def test_no_reply_past_the_last_page_ends_the_scan():
+    """CURRENT_PAGE may be a count, not the highest index: the extra request may go
+    unanswered, and that must not fail a sync whose pages are all downloaded."""
+    t = FakeTablet(handshake(pages=1) + [count(1), p87(1)])  # nothing for page 1
+    pages = []
+    assert await run(SyncSession(t, idle_timeout=0.01, reply_timeout=0.01), pages) == 1
+
+
+async def test_no_reply_for_the_first_page_fails():
+    t = FakeTablet(handshake(pages=1))
+    with pytest.raises(TimeoutError):
+        await run(SyncSession(t, idle_timeout=0.01, reply_timeout=0.01), [])
+
+
+class ChattyTablet(FakeTablet):
+    """After the script, answers every read with a heartbeat — never goes idle."""
+
+    async def recv(self, timeout=None):
+        if self._inbound:
+            return self._inbound.pop(0)
+        await asyncio.sleep(0.001)
+        return frames.heart_beat()
+
+
+async def test_page_deadline_stops_a_device_that_never_goes_idle():
+    t = ChattyTablet(handshake(pages=1) + [count(5), p87(1)])
+    with pytest.raises(TimeoutError):
+        await run(SyncSession(t, idle_timeout=0.05, page_timeout=0.3), [])

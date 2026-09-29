@@ -32,9 +32,12 @@ Huion Note X10*).
 **How it syncs**
 
 1. Home Assistant's `bluetooth` integration reports an advertisement from the notebook.
-2. If no sync ran within the cooldown (default 5 min; 60 s after a failed attempt), it
-   connects, runs the keyless handshake (optional PIN), reads battery + page count and
-   downloads every non-empty page, re-fetching dropped packets.
+2. If no sync ran within the cooldown (default 5 min, remembered across restarts;
+   60 s after a failed attempt), it connects, runs the keyless handshake (optional
+   PIN), reads battery + page count and downloads every non-empty page, re-fetching
+   dropped packets. If the notebook wants a PIN, or rejects the one you set,
+   automatic syncs pause and a repair issue appears under *Settings → Repairs*;
+   saving the PIN in the options resumes them.
 3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,png}` (e.g.
    `20260929T063000Z-page1-3f9a1c2e.png`) to `<media>/huion_notes/` (so it shows up
    under *Media → My media*), unless you set another folder. Existing files are never

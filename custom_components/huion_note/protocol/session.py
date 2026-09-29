@@ -18,6 +18,13 @@ from .frames import OrderCode
 
 _LOGGER = logging.getLogger(__name__)
 
+MAX_REPORTED_PAGES = 1024  # sanity cap on the device's CURRENT_PAGE value
+PAGE_TIMEOUT = 300.0       # seconds per page; ~4400 packets take <1 min even via a proxy
+
+
+class NoPageReply(TimeoutError):
+    """The device didn't answer a page request (REQUEST_OFFLINE_DATA)."""
+
 
 class Transport(Protocol):
     async def connect(self) -> None: ...
@@ -29,12 +36,16 @@ class Transport(Protocol):
 class SyncSession:
     def __init__(self, transport: Transport, pin: Optional[str] = None,
                  idle_timeout: float = 5.0, max_pages: int = 64,
-                 reply_timeout: float = 10.0):
+                 reply_timeout: float = 10.0,
+                 max_reported_pages: int = MAX_REPORTED_PAGES,
+                 page_timeout: float = PAGE_TIMEOUT):
         self.t = transport
         self.pin = pin
         self.idle = idle_timeout
-        self.max_pages = max_pages
+        self.max_pages = max_pages  # scan bound when the device doesn't report a count
         self.reply_timeout = reply_timeout
+        self.max_reported_pages = max_reported_pages
+        self.page_timeout = page_timeout
         self.limits = codec.Limits()
         self.battery: Optional[int] = None
 
@@ -50,10 +61,32 @@ class SyncSession:
         await self.t.send(d1)
         await self.t.send(d2)
 
-        last_page = page_count if 1 <= page_count <= self.max_pages else self.max_pages - 1
+        if page_count >= 1:
+            # Trust the device's count (indices are logic pages; empty slots persist,
+            # so it can exceed the number of pages with content). It's unknown whether
+            # CURRENT_PAGE is a count or the highest index, so scan 0..page_count
+            # inclusive — at worst one extra request, which ends the scan below.
+            if page_count > self.max_reported_pages:
+                _LOGGER.warning("device reports %d pages; scanning only the first %d",
+                                page_count, self.max_reported_pages)
+                page_count = self.max_reported_pages
+            last_page = page_count
+        else:
+            last_page = self.max_pages - 1
         delivered = 0
         for page in range(last_page + 1):
-            count, packets, complete = await self._fetch_page(page)
+            try:
+                # Per-page deadline: the stream/retransmit loops restart their idle
+                # timer on any frame, so a chatty device could otherwise stall forever.
+                async with asyncio.timeout(self.page_timeout):
+                    count, packets, complete = await self._fetch_page(page)
+            except NoPageReply:
+                if page == 0:
+                    raise
+                log = _LOGGER.debug if page == last_page else _LOGGER.warning
+                log("no reply for page %d of %d — treating it as the end of the notebook",
+                    page, last_page)
+                break
             if count == 0:
                 continue  # empty page — skip, keep scanning
             await on_page(codec.decode_page(packets, self.limits, page, complete))
@@ -110,8 +143,11 @@ class SyncSession:
     async def _fetch_page(self, page: int) -> tuple[int, list[bytes], bool]:
         """Download one page: (count, ordered_packets, complete). count 0 = empty."""
         await self.t.send(frames.request_page_data(page, 0))
-        count = frames.parse_offline_count(
-            (await self._recv_op(OrderCode.REQUEST_OFFLINE_DATA)).raw)
+        try:
+            reply = await self._recv_op(OrderCode.REQUEST_OFFLINE_DATA)
+        except asyncio.TimeoutError as err:
+            raise NoPageReply(f"no reply to page {page} request") from err
+        count = frames.parse_offline_count(reply.raw)
         if not count:
             return 0, [], True
         got: dict[int, bytes] = {}

@@ -26,7 +26,7 @@
           "pin": "Device PIN (6 digits, only if set on the notebook)"
         },
         "data_description": {
-          "delete_after_sync": "Only complete pages whose SVG, JSON and PNG are safely on disk are deleted.",
+          "delete_after_sync": "Only complete pages with strokes whose SVG, JSON and PNG are safely on disk are deleted. The current (last) page is always kept.",
           "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser."
         }
       }

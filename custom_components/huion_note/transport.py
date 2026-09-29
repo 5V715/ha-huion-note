@@ -23,6 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # 126-byte data values need ATT_MTU >= 129.
 MIN_MTU = 129
+DISCONNECT_TIMEOUT = 15  # seconds
 
 
 class BleakTransport:
@@ -97,7 +98,10 @@ class BleakTransport:
             self._ka_task = None
         if self._client:
             client, self._client = self._client, None
+            # BlueZ's disconnect() can raise TimeoutError (and other errors) or hang;
+            # a failed disconnect must never stop the caller from saving its progress.
             try:
-                await client.disconnect()
-            except BleakError:
-                pass
+                async with asyncio.timeout(DISCONNECT_TIMEOUT):
+                    await client.disconnect()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("%s: disconnect failed", self._device.address, exc_info=True)

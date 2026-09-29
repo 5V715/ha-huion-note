@@ -48,7 +48,7 @@ from .transport import BleakTransport
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-MAX_KNOWN_DIGESTS = 5000
+MAX_KNOWN_PAGES = 5000
 SYNC_TIMEOUT = 15 * 60  # seconds; a full 64-page notebook fits comfortably
 
 
@@ -61,7 +61,8 @@ class HuionNoteData:
     total_pages: int = 0
     battery: int | None = None
     latest_page: str | None = None  # PNG path of the most recently saved page
-    known_digests: list[str] = field(default_factory=list)
+    # page digest -> file base path (no extension) of its saved copy, oldest first
+    known_pages: dict[str, str] = field(default_factory=dict)
 
 
 def default_output_dir(hass: HomeAssistant) -> str:
@@ -101,7 +102,7 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
         d = HuionNoteData()
-        for key in ("last_new_pages", "total_pages", "battery", "latest_page", "known_digests"):
+        for key in ("last_new_pages", "total_pages", "battery", "latest_page", "known_pages"):
             if key in stored:
                 setattr(d, key, stored[key])
         if stored.get("last_sync"):
@@ -145,9 +146,18 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
         if self._last_failure and now - self._last_failure < FAILURE_BACKOFF:
             return
         _LOGGER.debug("%s: seen (rssi %s) — starting sync", self.address, service_info.rssi)
-        self._task = self.config_entry.async_create_background_task(
-            self.hass, self.async_sync(), f"{DOMAIN} sync {self.address}"
-        )
+        self.async_request_sync()
+
+    @callback
+    def async_request_sync(self) -> asyncio.Task[bool]:
+        """Start a sync (or join the running one). The task belongs to the config
+        entry, so unloading/reloading the entry cancels it — a sync never outlives
+        the coordinator (and the options) it started with."""
+        if self._task is None or self._task.done():
+            self._task = self.config_entry.async_create_background_task(
+                self.hass, self.async_sync(), f"{DOMAIN} sync {self.address}"
+            )
+        return self._task
 
     # --- sync --------------------------------------------------------------------
 
@@ -158,7 +168,8 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
 
     async def async_sync(self) -> bool:
         """Pull every page off the tablet. Returns True on success. Never raises
-        for device/transport problems — they land in data.status/last_error."""
+        for device/transport problems — they land in data.status/last_error.
+        Call via async_request_sync() so the run is tied to the config entry."""
         if self._lock.locked():
             _LOGGER.debug("%s: sync already running", self.address)
             return False
@@ -177,46 +188,59 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
             return False
 
         self._set_status(STATUS_SYNCING)
-        known = set(self.data.known_digests)
         started = dt_util.now()
         out_dir = self.output_dir
-        delete_after = self._opts.get(CONF_DELETE_AFTER_SYNC, False)
-        deletable: list[int] = []  # tablet indices safe to delete (complete + on disk)
+        known = self.data.known_pages
+        # Tablet indices whose content is verified on disk, complete and non-empty.
+        deletable: list[int] = []
         new_pages: list[SavedPage] = []
+        highest = -1  # the current (last) page — never deleted, it may still be written on
 
         async def on_page(page: Page) -> None:
-            digest = page_digest(page)
-            if digest in known:
-                _LOGGER.debug("page %d already saved — skipping", page.index)
-                if page.complete:
-                    deletable.append(page.index)
-                return
-            saved = await self.hass.async_add_executor_job(
-                write_page, page, out_dir, started
-            )
-            on_disk = await self.hass.async_add_executor_job(is_saved, saved)
-            known.add(digest)
-            self.data.known_digests.append(digest)
-            new_pages.append(saved)
-            self.data.latest_page = saved.png
-            self.data.total_pages += 1
-            if on_disk and page.complete:
+            nonlocal highest
+            highest = max(highest, page.index)
+            digest = await self.hass.async_add_executor_job(page_digest, page)
+            base = known.get(digest)
+            if base and await self.hass.async_add_executor_job(is_saved, base):
+                _LOGGER.debug("page %d already saved as %s", page.index, base)
+            else:
+                if base:
+                    _LOGGER.warning(
+                        "page %d was saved before as %s but those files are gone — "
+                        "saving it again", page.index + 1, base,
+                    )
+                saved = await self.hass.async_add_executor_job(
+                    write_page, page, out_dir, started, digest
+                )
+                if not await self.hass.async_add_executor_job(is_saved, saved.base):
+                    _LOGGER.warning("page %d: files not confirmed on disk — kept on tablet",
+                                    page.index + 1)
+                    return
+                base = known[digest] = saved.base
+                new_pages.append(saved)
+                self.data.latest_page = saved.png
+                self.data.total_pages += 1
+                self.hass.bus.async_fire(
+                    EVENT_PAGE_SAVED,
+                    {
+                        "address": self.address,
+                        "page": page.index + 1,
+                        "strokes": len(page.strokes),
+                        "complete": page.complete,
+                        "png": saved.png,
+                        "svg": saved.svg,
+                        "json": saved.json,
+                    },
+                )
+                self.async_update_listeners()
+            if not page.complete:
+                _LOGGER.warning("page %d incomplete — saved, kept on tablet", page.index + 1)
+            elif not page.strokes:
+                # Dots only, or something the decoder didn't understand: the points are
+                # in the JSON, but keep the tablet's copy rather than trust a blank page.
+                _LOGGER.info("page %d has no strokes — kept on tablet", page.index + 1)
+            else:
                 deletable.append(page.index)
-            elif not page.complete:
-                _LOGGER.warning("page %d incomplete — saved, kept on tablet", page.index)
-            self.hass.bus.async_fire(
-                EVENT_PAGE_SAVED,
-                {
-                    "address": self.address,
-                    "page": page.index + 1,
-                    "strokes": len(page.strokes),
-                    "complete": page.complete,
-                    "png": saved.png,
-                    "svg": saved.svg,
-                    "json": saved.json,
-                },
-            )
-            self.async_update_listeners()
 
         transport = BleakTransport(
             ble_device, ble_device_callback=lambda: self._ble_device() or ble_device
@@ -227,13 +251,16 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
             async with asyncio.timeout(SYNC_TIMEOUT):
                 await transport.connect()
                 total = await session.run(on_page)
-                if delete_after and deletable:
-                    # Highest index first so the surviving indices can't shift.
-                    for idx in sorted(set(deletable), reverse=True):
+                # Re-read the option: never delete on a setting the user just turned off.
+                if self._opts.get(CONF_DELETE_AFTER_SYNC, False):
+                    # Highest index first so the surviving indices can't shift. The
+                    # current page is skipped: strokes added after it was downloaded
+                    # would be lost.
+                    for idx in sorted(set(deletable) - {highest}, reverse=True):
                         if await session.delete_page(idx):
                             deleted += 1
                         else:
-                            _LOGGER.warning("tablet did not confirm delete of page %d", idx)
+                            _LOGGER.warning("tablet did not confirm delete of page %d", idx + 1)
         except PinRequired:
             return self._fail("tablet requires a PIN — set it in the integration options")
         except AuthFailed as err:
@@ -244,8 +271,12 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
             _LOGGER.exception("%s: unexpected sync error", self.address)
             return self._fail(f"unexpected error: {err}")
         finally:
-            await transport.close()
-            del self.data.known_digests[:-MAX_KNOWN_DIGESTS]
+            try:
+                await transport.close()
+            except Exception:  # noqa: BLE001 — must not skip saving progress below
+                _LOGGER.debug("%s: error while disconnecting", self.address, exc_info=True)
+            for digest in list(known)[:-MAX_KNOWN_PAGES]:
+                del known[digest]
             if session.battery is not None:
                 self.data.battery = session.battery
             await self._async_save()

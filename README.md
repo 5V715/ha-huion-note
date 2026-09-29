@@ -35,13 +35,18 @@ Huion Note X10*).
 2. If no sync ran within the cooldown (default 5 min; 60 s after a failed attempt), it
    connects, runs the keyless handshake (optional PIN), reads battery + page count and
    downloads every non-empty page, re-fetching dropped packets.
-3. Each page is written as `<YYYYmmdd-HHMMSS>-page<N>.{svg,json,png}` to
-   `<media>/huion_notes/` (so it shows up under *Media → My media*), unless you set
-   another folder. Pages are identified by a hash of their strokes, so pages still
-   stored on the notebook are **not** saved again on the next sync; a page you kept
-   writing on is saved as a new version.
-4. Optionally (**off** by default) the notebook's copies are deleted — only complete
-   pages whose SVG, JSON and PNG are confirmed on disk, highest index first.
+3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,png}` (e.g.
+   `20260929T063000Z-page1-3f9a1c2e.png`) to `<media>/huion_notes/` (so it shows up
+   under *Media → My media*), unless you set another folder. Existing files are never
+   overwritten. The JSON holds the strokes plus every raw point (dots and pen-up
+   points included). Pages are identified by a hash of all their points, so pages
+   still stored on the notebook are **not** saved again on the next sync; if their
+   files have gone missing they are saved again. A page you kept writing on is saved
+   as a new version.
+4. Optionally (**off** by default) the notebook's copies are deleted, highest index
+   first. A page is only deleted if it downloaded completely, contains strokes, and
+   its SVG, JSON and PNG are confirmed on disk. The current (last) page is never
+   deleted, because you may still be writing on it.
 
 **Options** (*Configure* on the integration): delete pages after sync, cooldown minutes,
 output folder, device PIN.

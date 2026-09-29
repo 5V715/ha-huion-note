@@ -7,7 +7,7 @@ map to the page origin top-left with no axis flip (non-A4 device).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .frames import OrderCode
 
@@ -39,6 +39,9 @@ class Page:
     max_press: float
     strokes: list[list[StylusPoint]]
     complete: bool = True  # False if packets were still missing after retransmit
+    # Every decoded point in stream order, including pen-up points and single-point
+    # dots that points_to_strokes() drops. This is the lossless record of the page.
+    points: list[StylusPoint] = field(default_factory=list)
 
 
 def decode_point(rec: bytes) -> StylusPoint:
@@ -97,4 +100,5 @@ def decode_page(packets: list, limits: Limits, index: int = 0, complete: bool = 
         max_press=limits.max_press,
         strokes=points_to_strokes(pts),
         complete=complete,
+        points=pts,
     )

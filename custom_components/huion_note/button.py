@@ -20,7 +20,8 @@ async def async_setup_entry(
 
 class HuionNoteSyncButton(HuionNoteEntity, ButtonEntity):
     async def async_press(self) -> None:
-        if not await self.coordinator.async_sync():
+        # Joins a sync that is already running instead of starting a second one.
+        if not await self.coordinator.async_request_sync():
             raise HomeAssistantError(
-                f"Sync failed: {self.coordinator.data.last_error or 'already running'}"
+                f"Sync failed: {self.coordinator.data.last_error or 'unknown error'}"
             )

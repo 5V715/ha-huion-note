@@ -45,6 +45,11 @@ def render_json(page: Page) -> str:
             "max_y": page.max_y,
             "max_press": page.max_press,
             "complete": page.complete,
+            # Lossless: every point in stream order, incl. pen-up points and dots.
+            "points": [
+                {"x": p.x, "y": p.y, "press": p.press, "pen_down": p.pen_down}
+                for p in page.points
+            ],
             "strokes": [
                 [{"x": p.x, "y": p.y, "press": p.press, "pen_down": p.pen_down} for p in s]
                 for s in page.strokes

@@ -1,6 +1,7 @@
 """Home Assistant integration tests (pytest-homeassistant-custom-component)."""
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from unittest.mock import patch
@@ -101,11 +102,12 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
 
     tablet = FakeTablet(handshake(bat=64, pages=1) + [count(1), p87(1), count(2), p87(1), p87(2, x=3)])
     t_patch, d_patch = _patch_tablet(tablet)
-    with t_patch, d_patch:
+    with t_patch as bt, d_patch:
         coordinator._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
         # A second advertisement while syncing must not start another sync.
         coordinator._async_handle_advertisement(service_info(), BluetoothChange.ADVERTISEMENT)
         await hass.async_block_till_done(wait_background_tasks=True)
+    assert bt.call_count == 1
 
     assert tablet.connected and tablet.closed
     assert len(saved_events) == 2
@@ -126,27 +128,142 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
         bt.assert_not_called()
 
 
+THREE_PAGES = handshake(pages=2) + [count(1), p87(1), count(1), p87(1, x=5), count(1), p87(1, x=9)]
+
+
+def pngs(path):
+    return sorted(f for f in os.listdir(path) if f.endswith(".png"))
+
+
 async def test_resync_dedupes_and_deletes(hass: HomeAssistant, tmp_path) -> None:
     entry = await _setup(hass, tmp_path, **{CONF_DELETE_AFTER_SYNC: True})
     coordinator = entry.runtime_data
     saved_events = async_capture_events(hass, EVENT_PAGE_SAVED)
-    script = handshake(pages=1) + [count(1), p87(1), count(1), p87(1, x=5)]
 
-    first = FakeTablet(script)
+    first = FakeTablet(THREE_PAGES)
     t_patch, d_patch = _patch_tablet(first)
     with t_patch, d_patch:
         assert await coordinator.async_sync()
-    assert len(saved_events) == 2
-    # highest index first
+    assert len(saved_events) == 3
+    # Highest index first, and the current (last) page is never deleted.
     assert [fr[3] for fr in first.ops(OrderCode.DELETE_PAGE)] == [1, 0]
 
-    second = FakeTablet(script)  # same content again (e.g. delete didn't stick)
+    second = FakeTablet(THREE_PAGES)  # same content again (e.g. delete didn't stick)
     t_patch, d_patch = _patch_tablet(second)
     with t_patch, d_patch:
         assert await coordinator.async_sync()
-    assert len(saved_events) == 2  # nothing new written
-    assert len(second.ops(OrderCode.DELETE_PAGE)) == 2
-    assert len([f for f in os.listdir(tmp_path) if f.endswith(".png")]) == 2
+    assert len(saved_events) == 3  # nothing new written
+    assert [fr[3] for fr in second.ops(OrderCode.DELETE_PAGE)] == [1, 0]
+    assert len(pngs(tmp_path)) == 3
+
+
+async def test_known_page_with_missing_files_is_saved_again_before_delete(
+    hass: HomeAssistant, tmp_path
+) -> None:
+    """Review finding: a page seen before was deleted even though its files were gone."""
+    entry = await _setup(hass, tmp_path)  # delete off
+    t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+    with t_patch, d_patch:
+        assert await entry.runtime_data.async_sync()
+    for f in os.listdir(tmp_path):  # user moved the files away
+        os.remove(tmp_path / f)
+
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_DELETE_AFTER_SYNC: True}
+    )
+    await hass.async_block_till_done()
+    tablet = FakeTablet(THREE_PAGES)
+    t_patch, d_patch = _patch_tablet(tablet)
+    with t_patch, d_patch:
+        assert await entry.runtime_data.async_sync()
+    assert len(pngs(tmp_path)) == 3  # re-written before anything was deleted
+    assert [fr[3] for fr in tablet.ops(OrderCode.DELETE_PAGE)] == [1, 0]
+
+
+async def test_failed_write_deletes_nothing(hass: HomeAssistant, tmp_path) -> None:
+    entry = await _setup(hass, tmp_path, **{CONF_DELETE_AFTER_SYNC: True})
+    tablet = FakeTablet(THREE_PAGES)
+    t_patch, d_patch = _patch_tablet(tablet)
+    with t_patch, d_patch, patch(
+        "custom_components.huion_note.coordinator.write_page", side_effect=OSError("disk full")
+    ):
+        assert not await entry.runtime_data.async_sync()
+    assert not tablet.ops(OrderCode.DELETE_PAGE)
+    assert entry.runtime_data.data.status == "error"
+    assert entry.runtime_data.data.known_pages == {}
+
+
+def dot_page(x):
+    """One packet holding a single dot: pen-down point, then pen-up point."""
+    down = bytes([x, 0x01, 0x10, 0x00, 0x05, 0x20])
+    up = bytes([x, 0x01, 0x10, 0x00, 0x00, 0x00])
+    return bytes([0xCD, 0x87, 0x7E, 1, 0]) + down + up + bytes([0xEE])
+
+
+async def test_dot_only_pages_are_distinct_and_kept_on_tablet(hass: HomeAssistant, tmp_path) -> None:
+    """Review finding: pages decoding to no strokes shared one digest and were deleted."""
+    entry = await _setup(hass, tmp_path, **{CONF_DELETE_AFTER_SYNC: True})
+    tablet = FakeTablet(handshake(pages=2) + [count(1), dot_page(1), count(1), dot_page(2),
+                                              count(1), p87(1)])
+    t_patch, d_patch = _patch_tablet(tablet)
+    with t_patch, d_patch:
+        assert await entry.runtime_data.async_sync()
+    assert len(pngs(tmp_path)) == 3
+    assert not tablet.ops(OrderCode.DELETE_PAGE)  # 0,1 have no strokes; 2 is current
+
+
+async def test_disconnect_error_still_saves_progress(hass: HomeAssistant, tmp_path) -> None:
+    """Review finding: an error from close() left status 'syncing' and skipped the save."""
+    entry = await _setup(hass, tmp_path)
+    coordinator = entry.runtime_data
+    tablet = FakeTablet(THREE_PAGES)
+
+    async def bad_close():
+        tablet.closed = True
+        raise TimeoutError("disconnect timed out")
+
+    tablet.close = bad_close
+    t_patch, d_patch = _patch_tablet(tablet)
+    with t_patch, d_patch:
+        assert await coordinator.async_sync()
+    assert coordinator.data.status == "idle"
+    stored = await coordinator._store.async_load()
+    assert len(stored["known_pages"]) == 3
+
+
+class StallingTablet(FakeTablet):
+    """connect() blocks until cancelled — a sync that is still running."""
+
+    def __init__(self):
+        super().__init__([])
+        self.started = asyncio.Event()
+
+    async def connect(self):
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+async def test_button_sync_is_cancelled_on_unload(hass: HomeAssistant, tmp_path) -> None:
+    """Review finding: a button-started sync outlived an unload/reload."""
+    entry = await _setup(hass, tmp_path)
+    tablet = StallingTablet()
+    t_patch, d_patch = _patch_tablet(tablet)
+    with t_patch as bt, d_patch:
+        press = hass.async_create_task(hass.services.async_call(
+            "button", "press", {"entity_id": "button.huion_note_x10_sync_now"}, blocking=True))
+        try:
+            await tablet.started.wait()
+            # An advertisement during the button's sync joins it instead of starting another.
+            entry.runtime_data._async_handle_advertisement(
+                service_info(), BluetoothChange.ADVERTISEMENT)
+            assert bt.call_count == 1
+
+            assert await hass.config_entries.async_unload(entry.entry_id)
+            assert tablet.closed
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(press, 5)
+        finally:
+            press.cancel()  # on regression: don't leave a stuck sync to hang teardown
 
 
 async def test_sync_failure_sets_error(hass: HomeAssistant, tmp_path) -> None:

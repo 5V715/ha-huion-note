@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -69,25 +71,50 @@ async def test_delete_page_confirmed():
     assert t.ops(OrderCode.DELETE_PAGE)[0].hex() == "cd8b080300" + "0000ed"
 
 
-def _page():
+def _page(index=2):
     pts = [codec.StylusPoint(100 * i, 200 * i, 4000, True) for i in range(1, 5)]
-    return codec.Page(index=2, max_x=28200.0, max_y=37400.0, max_press=8191.0, strokes=[pts])
+    return codec.Page(index=index, max_x=28200.0, max_y=37400.0, max_press=8191.0,
+                      strokes=[pts], points=pts + [codec.StylusPoint(500, 1000, 0, False)])
+
+
+WHEN = datetime(2026, 9, 29, 8, 30, 0, tzinfo=timezone(timedelta(hours=2)))
 
 
 def test_write_page_and_digest(tmp_path):
-    from datetime import datetime
-
     page = _page()
-    saved = write_page(page, str(tmp_path / "out"), datetime(2026, 9, 29, 8, 30, 0))
-    assert saved.base.endswith("20260929-083000-page3")
-    assert is_saved(saved)
-    assert json.loads(open(saved.json).read())["strokes"][0][0] == {
-        "x": 100, "y": 200, "press": 4000, "pen_down": True}
+    digest = page_digest(page)
+    saved = write_page(page, str(tmp_path / "out"), WHEN, digest)
+    # UTC timestamp + digest prefix
+    assert os.path.basename(saved.base) == f"20260929T063000Z-page3-{digest[:8]}"
+    assert is_saved(saved.base)
+    data = json.loads(open(saved.json).read())
+    assert data["strokes"][0][0] == {"x": 100, "y": 200, "press": 4000, "pen_down": True}
+    # the lossless point list keeps pen-up points too
+    assert data["points"][-1] == {"x": 500, "y": 1000, "press": 0, "pen_down": False}
     assert open(saved.png, "rb").read()[:4] == b"\x89PNG"
     # index-independent identity
-    other = _page()
-    other.index = 0
-    assert page_digest(other) == saved.digest
+    assert page_digest(_page(index=0)) == digest
+
+
+def test_write_page_never_overwrites(tmp_path):
+    page = _page()
+    digest = page_digest(page)
+    first = write_page(page, str(tmp_path), WHEN, digest)
+    open(first.png, "ab").write(b"marker")
+    second = write_page(page, str(tmp_path), WHEN, digest)  # same name would clash
+    assert second.base == first.base + "-1"
+    assert open(first.png, "rb").read().endswith(b"marker")
+    assert is_saved(second.base)
+
+
+def test_digest_covers_dots_and_pen_up_points():
+    dot = lambda x: [codec.StylusPoint(x, 10, 50, True), codec.StylusPoint(x, 10, 0, False)]
+    a = codec.decode_page([], codec.Limits(), 0)
+    a.points = dot(100)
+    b = codec.decode_page([], codec.Limits(), 1)
+    b.points = dot(900)
+    assert a.strokes == b.strokes == []  # the decoder drops single-point strokes
+    assert page_digest(a) != page_digest(b)
 
 
 def test_svg_output():

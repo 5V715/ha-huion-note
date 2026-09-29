@@ -3,19 +3,34 @@
     "flow_title": "{name}",
     "step": {
       "user": {
+        "description": "Home Assistant can see these Huion notebooks. Pick one, or enter a Bluetooth address.",
+        "menu_options": {
+          "pick_device": "Pick a discovered notebook",
+          "manual": "Enter a Bluetooth address"
+        }
+      },
+      "bluetooth_confirm": {
+        "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
+      },
+      "pick_device": {
         "description": "Pick the notebook. It must be awake and in range of a Bluetooth adapter or proxy.",
         "data": {
           "address": "Device"
         }
       },
-      "bluetooth_confirm": {
-        "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
+      "manual": {
+        "description": "Enter the notebook's Bluetooth address (e.g. `AA:BB:CC:DD:EE:FF`), or pick it from the nearby devices listed (strongest signal first; wake the notebook and it should be near the top). The notebook doesn't have to be in range now — pages sync the next time Home Assistant sees it.",
+        "data": {
+          "address": "Bluetooth address"
+        }
       }
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "no_devices_found": "No Huion notebook found nearby. Wake it up and try again.",
       "not_supported": "Device not supported"
+    },
+    "error": {
+      "invalid_address": "Enter a Bluetooth address like AA:BB:CC:DD:EE:FF."
     }
   },
   "options": {

@@ -43,6 +43,15 @@ Wake the notebook. Home Assistant discovers it by its advertised name (`Huion No
 and offers to set it up (or add it via *Settings → Devices & services → Add integration →
 Huion Note X10*).
 
+**Name not showing up?** Discovery needs the advertised name, which some adapters and
+proxies never receive (e.g. when the name is only in the scan response and they scan
+passively). Add it by address instead: *Add integration → Huion Note X10 → Enter a
+Bluetooth address*. The field lists nearby connectable devices, strongest signal first
+(unnamed ones show as "no name"), so with the notebook awake next to the adapter it is
+usually at the top. You can also type the address (`AA:BB:CC:DD:EE:FF`; dashes or no
+separators work too). The notebook doesn't need to be in range while you do this.
+After setup only the address is used, so the name no longer matters.
+
 **How it syncs**
 
 1. Home Assistant's `bluetooth` integration reports an advertisement from the notebook.

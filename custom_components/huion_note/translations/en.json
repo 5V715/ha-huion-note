@@ -1,0 +1,77 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Pick the notebook. It must be awake and in range of a Bluetooth adapter or proxy.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "bluetooth_confirm": {
+        "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
+      }
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "no_devices_found": "No Huion notebook found nearby. Wake it up and try again.",
+      "not_supported": "Device not supported"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "delete_after_sync": "Delete pages from the notebook after they are saved",
+          "cooldown": "Minutes between automatic syncs",
+          "output_dir": "Folder for saved pages",
+          "pin": "Device PIN (6 digits, only if set on the notebook)"
+        },
+        "data_description": {
+          "delete_after_sync": "Only complete pages with strokes whose SVG, JSON and PNG are safely on disk are deleted. The current (last) page is always kept.",
+          "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser."
+        }
+      }
+    },
+    "error": {
+      "invalid_pin": "The PIN must be exactly 6 digits."
+    }
+  },
+  "entity": {
+    "button": {
+      "sync": {
+        "name": "Sync now"
+      }
+    },
+    "image": {
+      "latest_page": {
+        "name": "Latest page"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Sync status",
+        "state": {
+          "idle": "Idle",
+          "syncing": "Syncing",
+          "error": "Error"
+        }
+      },
+      "last_sync": {
+        "name": "Last sync"
+      },
+      "pages_saved": {
+        "name": "Pages saved"
+      },
+      "battery": {
+        "name": "Battery"
+      }
+    }
+  },
+  "issues": {
+    "auth_failed": {
+      "title": "{name} needs its PIN",
+      "description": "Home Assistant couldn't sign in to {name}: {reason}. Automatic syncs are paused. Open *Settings → Devices & services → Huion Note X10 → Configure*, enter the notebook's 6-digit PIN (or correct it) and save; syncing resumes the next time the notebook is seen."
+    }
+  }
+}

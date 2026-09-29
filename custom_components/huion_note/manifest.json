@@ -1,0 +1,17 @@
+{
+  "domain": "huion_note",
+  "name": "Huion Note X10",
+  "bluetooth": [
+    { "local_name": "Huion*", "connectable": true },
+    { "local_name": "HUION*", "connectable": true }
+  ],
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/5v715/huion-note-x10-ble",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/5v715/huion-note-x10-ble/issues",
+  "requirements": ["Pillow"],
+  "version": "0.1.0"
+}

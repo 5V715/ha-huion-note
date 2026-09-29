@@ -90,11 +90,10 @@ def test_write_page_and_digest(tmp_path):
     assert page_digest(other) == saved.digest
 
 
-def test_svg_parity_with_cli_renderer():
-    from huion_notes import codec as cli_codec, render as cli_render
-
-    page = _page()
-    cli_page = cli_codec.Page(index=2, max_x=page.max_x, max_y=page.max_y, max_press=page.max_press,
-                              strokes=[[cli_codec.StylusPoint(p.x, p.y, p.press, p.pen_down)
-                                        for p in page.strokes[0]]])
-    assert render.render_svg(page) == cli_render.render_svg(cli_page)
+def test_svg_output():
+    # Same bytes the original huion_notes CLI renderer produced for this page.
+    assert render.render_svg(_page()) == (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1190" '
+        'style="background:#fff"><path d="M18.1,21.2 L21.2,27.4 L24.3,33.6 L27.3,39.8" '
+        'fill="none" stroke="#111" stroke-width="2.5"/></svg>'
+    )

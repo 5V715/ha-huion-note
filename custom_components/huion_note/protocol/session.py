@@ -2,10 +2,9 @@
 Transport (connect/send/recv/close); the integration supplies a bleak-backed one,
 the tests a scripted fake.
 
-Port of huion_notes/session.py with the Android SyncEngine's refinements: the
-device's CURRENT_PAGE count bounds the scan and empty pages are skipped (some
-firmware keeps an empty page 0 with content after it), battery is read during
-the handshake, and every page carries a `complete` flag.
+The device's CURRENT_PAGE count bounds the scan and empty pages are skipped
+(some firmware keeps an empty page 0 with content after it), battery is read
+during the handshake, and every page carries a `complete` flag.
 """
 from __future__ import annotations
 

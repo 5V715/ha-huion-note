@@ -21,7 +21,7 @@ def _scalers(page: Page, width: int, height: int, pad: int):
 
 
 def render_svg(page: Page, width: int = WIDTH, height: int = HEIGHT, pad: int = PAD) -> str:
-    """strokes -> SVG paths. Byte-identical to huion_notes.render.render_svg."""
+    """strokes -> SVG paths. Origin top-left, no axis flip (non-A4 device)."""
     sx, sy = _scalers(page, width, height, pad)
     paths = []
     for s in page.strokes:
@@ -54,7 +54,7 @@ def render_json(page: Page) -> str:
 
 
 def render_png(page: Page, width: int = WIDTH, height: int = HEIGHT, pad: int = PAD) -> bytes:
-    """Rasterise with pressure-scaled line width (mirrors android PageRenderer)."""
+    """Rasterise with pressure-scaled line width."""
     from PIL import Image, ImageDraw  # lazy: keeps the rest of the module stdlib-only
 
     # Draw at 2x and downsample for cheap anti-aliasing.

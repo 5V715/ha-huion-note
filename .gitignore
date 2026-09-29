@@ -27,3 +27,6 @@ apk/
 bugreport*.zip
 decoded*.svg
 decoded*.png
+
+# Home Assistant integration tests
+.pytest_cache/

@@ -7,9 +7,11 @@
 
 Use the Huion Note X10 fully on Linux — **no Huion app, no cloud.** Huion's official
 Linux driver deliberately disables BLE, so the protocol was reverse-engineered from
-the macOS/Windows drivers (Ghidra), Android BLE captures + APK. The repo gives you two
-tools that share that work:
+the macOS/Windows drivers (Ghidra), Android BLE captures + APK. The repo gives you
+several tools that share that work:
 
+- **Home Assistant integration** — Home Assistant pulls your pages automatically
+  whenever it sees the notebook over Bluetooth.
 - **Tablet driver** — live pen input (pressure + tilt) for Linux.
 - **Pages extractor** — pull the pages you wrote *offline* on the notebook and decode
   them to SVG + PNG + JSON, locally.
@@ -24,6 +26,13 @@ Both talk to the device over BLE and both need a small [BlueZ patch](#requiremen
 ---
 
 ## What you can do
+
+### 🏠 Sync pages into Home Assistant
+
+Install the `huion_note` custom integration; whenever the notebook comes into range of a
+Home Assistant Bluetooth adapter or ESPHome Bluetooth proxy, its pages are pulled,
+decoded and saved to your media folder as PNG + SVG + JSON. No button to press.
+Details → [**Home Assistant integration**](#home-assistant-integration).
 
 ### 🖊️ Use it as a drawing tablet
 
@@ -50,6 +59,85 @@ is deleted only after its SVG + JSON are confirmed written.
 ```
 
 Validated end-to-end on hardware. Details → [**Note extractor**](#note-extractor).
+
+---
+
+## Home Assistant integration
+
+`custom_components/huion_note` is a self-contained Home Assistant integration (the
+protocol core is vendored from `huion_notes/`, so nothing else from this repo is needed).
+
+**Install**
+
+- **HACS:** *HACS → ⋮ → Custom repositories* → add this repo's URL as an
+  *Integration* → install **Huion Note X10** → restart Home Assistant.
+- **Manual:** copy `custom_components/huion_note/` into `<config>/custom_components/`
+  and restart.
+
+Wake the notebook. Home Assistant discovers it by its advertised name (`Huion Note-X10`)
+and offers to set it up (or add it via *Settings → Devices & services → Add integration →
+Huion Note X10*).
+
+**How it syncs**
+
+1. Home Assistant's `bluetooth` integration reports an advertisement from the notebook.
+2. If no sync ran within the cooldown (default 5 min; 60 s after a failed attempt), it
+   connects, runs the keyless handshake (optional PIN), reads battery + page count and
+   downloads every non-empty page, re-fetching dropped packets.
+3. Each page is written as `<YYYYmmdd-HHMMSS>-page<N>.{svg,json,png}` to
+   `<media>/huion_notes/` (so it shows up under *Media → My media*), unless you set
+   another folder. Pages are identified by a hash of their strokes, so pages still
+   stored on the notebook are **not** saved again on the next sync; a page you kept
+   writing on is saved as a new version.
+4. Optionally (**off** by default) the notebook's copies are deleted — only complete
+   pages whose SVG, JSON and PNG are confirmed on disk, highest index first.
+
+**Options** (*Configure* on the integration): delete pages after sync, cooldown minutes,
+output folder, device PIN.
+
+**Entities**
+
+| Entity | What |
+|--------|------|
+| `sensor.<name>_sync_status` | `idle` / `syncing` / `error` (`last_error` attribute) |
+| `sensor.<name>_last_sync` | timestamp of the last successful sync (`new_pages`, `latest_page` attributes) |
+| `sensor.<name>_pages_saved` | pages saved so far |
+| `sensor.<name>_battery` | notebook battery %, read during each sync |
+| `image.<name>_latest_page` | the most recently saved page |
+| `button.<name>_sync_now` | sync immediately (the notebook must be awake and in range) |
+
+**Events** — for automations (OCR, notify, copy to Nextcloud, …):
+
+- `huion_note_page_saved` — `{address, page, strokes, complete, png, svg, json}` per new page
+- `huion_note_sync_finished` — `{address, pages_on_tablet, new_pages, deleted, files}`
+
+```yaml
+automation:
+  - alias: Notify on new handwritten pages
+    triggers:
+      - trigger: event
+        event_type: huion_note_sync_finished
+    conditions: "{{ trigger.event.data.new_pages > 0 }}"
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          message: "{{ trigger.event.data.new_pages }} new page(s) from the notebook"
+```
+
+**Caveats**
+
+- **Bluetooth link.** The firmware's duplicate MTU-request bug (see
+  [below](#requirements-patch-bluez)) makes *unpatched* BlueZ drop the connection
+  after a few seconds. Home Assistant OS ships stock BlueZ, so either use an
+  [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)
+  near the notebook (recommended), or run HA on a host with the patched BlueZ.
+- **The notebook must advertise.** Home Assistant only sees it while it is awake and
+  advertising. A notebook that is paired/connected to another device (e.g. a phone
+  running the Huion app) may not advertise; disconnect it there.
+- The page protocol, decoder and dedupe/delete logic are covered by tests
+  (`pytest`, see `requirements_test.txt`), and the protocol is the same one validated
+  on hardware by the CLI and Android app — but the bleak transport inside Home
+  Assistant has not yet been run against a real notebook. Reports welcome.
 
 ---
 
@@ -265,14 +353,15 @@ keyboard (pen data is on vendor FFE0, not HID).
 ## Repo layout
 
 ```text
-huion_ble_driver.py        — live pen/tablet driver (dbus_fast + uinput)
-huion_notes/               — offline note extractor package (frames/auth/codec/render/session/transport/cli)
-android/                   — HiNote Sync — native Android app: sync pages over BLE, upload PNG+SVG, delete on tablet
-huion-x10-notes.sh         — launcher for the extractor (handles dbus_fast / Nix)
-patches/                   — BlueZ att.c patch for the firmware MTU bug
-*.service, *.rules         — systemd user services + udev rules (driver)
-docs/                      — protocol map, specs, overview, RE log (docs/notes/)
-captures/, apk/, notes-out/ — gitignored (personal captures, decompiled app, decoded pages)
+custom_components/huion_note/ — Home Assistant integration (HACS-installable; tests in tests/)
+huion_ble_driver.py           — live pen/tablet driver (dbus_fast + uinput)
+huion_notes/                  — offline note extractor package (frames/auth/codec/render/session/transport/cli)
+android/                      — HiNote Sync — native Android app: sync pages over BLE, upload PNG+SVG, delete on tablet
+huion-x10-notes.sh            — launcher for the extractor (handles dbus_fast / Nix)
+patches/                      — BlueZ att.c patch for the firmware MTU bug
+*.service, *.rules            — systemd user services + udev rules (driver)
+docs/                         — protocol map, specs, overview, RE log (docs/notes/)
+captures/, apk/, notes-out/   — gitignored (personal captures, decompiled app, decoded pages)
 ```
 
 ## License

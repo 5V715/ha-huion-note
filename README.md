@@ -13,8 +13,22 @@ pages are downloaded, decoded and saved to your media folder as PNG + SVG + JSON
 The offline-sync protocol was reverse-engineered from Huion's desktop drivers (Ghidra),
 Android BLE captures and the APK — see [`docs/offline-note-protocol.md`](docs/offline-note-protocol.md).
 
+**Credits:** this project is a fork of
+[Reginleif86/huion-note-x10-ble](https://github.com/Reginleif86/huion-note-x10-ble) by
+**Reginleif88**, who created the original Linux Bluetooth driver for the Huion Note X10
+and did the reverse-engineering this integration is built on — the BLE protocol, the
+offline-sync decoder, the extractor CLI and the Android app. The Home Assistant
+integration adds automatic syncing on top of that work.
+
 > Codebase maintained with [Claude Code](https://claude.ai/code). Not an official Huion
 > product.
+
+**🍺 Buy me a beer (feed my Claude)** — if this saves you some handwriting, a tip keeps
+the tokens flowing. Entirely optional:
+
+[![PayPal 5 €](https://img.shields.io/badge/PayPal-5_€-00457C?logo=paypal&logoColor=white)](https://paypal.me/silasschwarz/5EUR)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/silasschwarz)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-♥-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/5V715)
 
 ---
 
@@ -33,9 +47,12 @@ Huion Note X10*).
 
 1. Home Assistant's `bluetooth` integration reports an advertisement from the notebook.
 2. If no sync ran within the cooldown (default 5 min, remembered across restarts;
-   60 s after a failed attempt), it connects, runs the keyless handshake (optional
-   PIN), reads battery + page count and downloads every non-empty page, re-fetching
-   dropped packets. If the notebook wants a PIN, or rejects the one you set,
+   60 s after a failed attempt), it connects and pairs (the notebook drops
+   connections from unpaired devices; if it has forgotten the pairing — e.g. after
+   pairing with the Huion app on a phone — the old pairing is removed and redone),
+   runs the keyless handshake (optional PIN), reads battery + page count and
+   downloads every non-empty page, re-fetching dropped or corrupt packets
+   (checksum). If the notebook wants a PIN, or rejects the one you set,
    automatic syncs pause and a repair issue appears under *Settings → Repairs*;
    saving the PIN in the options resumes them.
 3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,png}` (e.g.

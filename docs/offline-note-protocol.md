@@ -10,6 +10,10 @@ Device VERSION string: **`HUION_T218_230819`** (internal model T218, fw 2023-08-
 
 Status legend: ✅ confirmed (capture + source) · 🟡 hypothesis · ❌ open.
 
+See also: [`app-2.2.3-protocol-notes.md`](app-2.2.3-protocol-notes.md) (newer app: ROM page
+window, checksums, pressure split, live mode, PIN) and
+[`linux-driver-ble-protocol.md`](linux-driver-ble-protocol.md) (desktop driver).
+
 ---
 
 ## 1. Transport: characteristics ✅
@@ -93,6 +97,13 @@ Pen-up (`status==0` or `press==0`) delimits strokes. `sync-01`: 13197 points →
   MAX_* from the capture's `0x95` packet.
 
 ## 6. Bind / auth gate ✅ (local, replicable — no server)
+
+**BLE pairing (bond) is required** ✅ (hardware, 2026-09-30): the notebook drops a
+connection from an unpaired central right after it is established, and when it has
+forgotten a pairing the central still holds (e.g. after pairing with the phone app),
+every connect times out. Pairing needs no PIN ("Just Works"). The app always
+`createBond`s first; the integration connects with `pair=True` and removes a stale
+BlueZ pairing on connect timeout.
 
 **Challenge–response** (the connect handshake). The **client sends a `VERIFY_CONNECT
 (0x81)` request first** (`cd 81 08 00 00 00 00 ed`, write to FFE2); the device then
@@ -191,8 +202,8 @@ The robust flow (how the official app "pre-knew" the count): query
 **`CURRENT_PAGE (0x85)`** first — `cd 85 08 00 00 00 00 ed`, reply
 `cd 85 05 <count_lo> <count_hi>` = logic-page count (u16 LE) — then request pages
 `0 … count`, **skipping** empty pages (`count == 0`) instead of stopping. The
-Android client (`SyncEngine`) does this; the Python `session.py` still has the
-old stop-at-first-empty loop and should be updated the same way.
+Android client (`SyncEngine`) did this; the integration's `session.py` does too, but
+prefers the `ROM 0x8f` window (see the app 2.2.3 notes) when the reply is plausible.
 
 ### Other opcodes
 - `0x8b DELETE_PAGE (139)`: delete one page by index

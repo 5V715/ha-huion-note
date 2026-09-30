@@ -23,8 +23,10 @@ class OrderCode:
     DELETE_PAGE = 0x8B          # destructive — sent only after a verified export
     CLEAR_CACHE = 0x8C          # destructive
     ELECTRICITY = 0x8E          # battery %, reply byte [3]
+    ROM = 0x8F                  # storage: free/total slots + last page index
     DEVICE_NAME = 0x91
     GET_PWD = 0x93
+    DISCONNECT = 0x94           # sent by the app before it closes the link
     MAX_DATA = 0x95
     SET_MANY_PACKET_DISTANCE = 0x96
     VERSION = 0xC9
@@ -101,3 +103,15 @@ def parse_offline_count(value: bytes) -> "int | None":
 
 def heart_beat() -> bytes:
     return build_command(OrderCode.HEART_BEAT)
+
+
+def parse_rom(value: bytes) -> "tuple[int, int] | None":
+    """Parse a ROM reply `cd 8f .. <free> <total> <last_lo> <last_hi> <flag>` into
+    (stored, last): pages holding data and the index of the last one. As in the
+    app, flag 0 means the last slot holds no page yet (last - 1). None if not such
+    a frame."""
+    if len(value) < 8 or value[0] != START or value[1] != OrderCode.ROM:
+        return None
+    free, total = value[3], value[4]
+    last = (value[5] | (value[6] << 8)) - (1 if value[7] == 0 else 0)
+    return total - free, last

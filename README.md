@@ -33,9 +33,12 @@ Huion Note X10*).
 
 1. Home Assistant's `bluetooth` integration reports an advertisement from the notebook.
 2. If no sync ran within the cooldown (default 5 min, remembered across restarts;
-   60 s after a failed attempt), it connects, runs the keyless handshake (optional
-   PIN), reads battery + page count and downloads every non-empty page, re-fetching
-   dropped packets. If the notebook wants a PIN, or rejects the one you set,
+   60 s after a failed attempt), it connects and pairs (the notebook drops
+   connections from unpaired devices; if it has forgotten the pairing — e.g. after
+   pairing with the Huion app on a phone — the old pairing is removed and redone),
+   runs the keyless handshake (optional PIN), reads battery + page count and
+   downloads every non-empty page, re-fetching dropped or corrupt packets
+   (checksum). If the notebook wants a PIN, or rejects the one you set,
    automatic syncs pause and a repair issue appears under *Settings → Repairs*;
    saving the PIN in the options resumes them.
 3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,png}` (e.g.

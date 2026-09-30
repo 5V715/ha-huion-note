@@ -29,7 +29,7 @@ from custom_components.huion_note.const import (
 )
 from custom_components.huion_note.protocol.frames import OrderCode
 
-from .conftest import FakeTablet, count, handshake, p87, vr
+from .conftest import FakeTablet, count, handshake, p87, vr, with_checksum
 
 ADDRESS = "AA:BB:CC:DD:EE:FF"
 DEVICE = BLEDevice(ADDRESS, "Huion Note-X10", None)
@@ -118,6 +118,8 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
     assert all(os.path.isfile(e.data["png"]) for e in saved_events)
     assert done_events[0].data["new_pages"] == 2
     assert not tablet.ops(OrderCode.DELETE_PAGE)  # delete-after-sync is off by default
+    # like the app, say goodbye before closing the link
+    assert tablet.sent[-1] == bytes([0xCD, OrderCode.DISCONNECT, 8, 0, 0, 0, 0, 0xED])
 
     assert hass.states.get("sensor.huion_note_x10_sync_status").state == "idle"
     assert hass.states.get("sensor.huion_note_x10_pages_saved").state == "2"
@@ -201,7 +203,7 @@ def dot_page(x):
     """One packet holding a single dot: pen-down point, then pen-up point."""
     down = bytes([x, 0x01, 0x10, 0x00, 0x05, 0x20])
     up = bytes([x, 0x01, 0x10, 0x00, 0x00, 0x00])
-    return bytes([0xCD, 0x87, 0x7E, 1, 0]) + down + up + bytes([0xEE])
+    return with_checksum(bytes([0xCD, 0x87, 0x7E, 1, 0]) + down + up)
 
 
 async def test_dot_only_pages_are_distinct_and_kept_on_tablet(hass: HomeAssistant, tmp_path) -> None:

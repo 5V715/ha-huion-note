@@ -290,6 +290,7 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
             return self._fail(f"unexpected error: {err}")
         finally:
             try:
+                await session.goodbye()  # DISCONNECT, like the app; a no-op if unconnected
                 await transport.close()
             except Exception:  # noqa: BLE001 — must not skip saving progress below
                 _LOGGER.debug("%s: error while disconnecting", self.address, exc_info=True)

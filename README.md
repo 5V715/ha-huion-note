@@ -28,6 +28,7 @@ the tokens flowing. Entirely optional:
 
 [![PayPal 5 €](https://img.shields.io/badge/PayPal-5_€-00457C?logo=paypal&logoColor=white)](https://paypal.me/silasschwarz/5EUR)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/silasschwarz)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-♥-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/5V715)
 
 ---
 

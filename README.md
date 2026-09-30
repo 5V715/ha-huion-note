@@ -13,6 +13,13 @@ pages are downloaded, decoded and saved to your media folder as PNG + SVG + JSON
 The offline-sync protocol was reverse-engineered from Huion's desktop drivers (Ghidra),
 Android BLE captures and the APK — see [`docs/offline-note-protocol.md`](docs/offline-note-protocol.md).
 
+**Credits:** this project is a fork of
+[Reginleif86/huion-note-x10-ble](https://github.com/Reginleif86/huion-note-x10-ble) by
+**Reginleif88**, who created the original Linux Bluetooth driver for the Huion Note X10
+and did the reverse-engineering this integration is built on — the BLE protocol, the
+offline-sync decoder, the extractor CLI and the Android app. The Home Assistant
+integration adds automatic syncing on top of that work.
+
 > Codebase maintained with [Claude Code](https://claude.ai/code). Not an official Huion
 > product.
 

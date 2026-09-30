@@ -238,6 +238,11 @@ actions:
         - "#send" or "#nachricht" → type message; text = the message.
 
 
+        Write the commands as a JSON array, e.g.
+        [{"type": "reminder", "text": "Müll rausbringen", "start": "2026-10-02 18:00"}]
+        — plain JSON, no code fence; [] if there are no commands.
+
+
         Dates and times: resolve relative ones ("tomorrow", "morgen", "fri",
         "Fr", "next week") from the current date above, always into the future.
         German-style dates like 12.10. mean day.month. Write start/end as
@@ -253,28 +258,16 @@ actions:
           selector:
             text:
               multiline: true
+        # A plain text field holding JSON: nested objects in the schema are
+        # rejected by Anthropic structured outputs ("additionalProperties must be
+        # explicitly set to false"), so the list is parsed below instead.
         commands:
-          description: Command lines found on the page, in page order. Empty if none.
+          description: >-
+            The commands as a JSON array of objects with "type", "text" and
+            optionally "start" and "end", in page order; [] if there are none.
           required: true
           selector:
-            object:
-              multiple: true
-              fields:
-                type:
-                  required: true
-                  selector:
-                    select:
-                      options: [todo, shopping, reminder, event, message]
-                text:
-                  required: true
-                  selector:
-                    text:
-                start:
-                  selector:
-                    text:
-                end:
-                  selector:
-                    text:
+            text:
       attachments:
         - media_content_id: "{{ media_content_id }}"
           media_content_type: image/png
@@ -282,7 +275,16 @@ actions:
 
   - variables:
       transcript: "{{ result.data.transcript }}"
-      commands: "{{ result.data.commands or [] }}"
+      # JSON text from the AI (tolerating a ```json fence); anything unreadable
+      # means no commands, never a failed page.
+      commands: >-
+        {% set raw = result.data.commands | default('') %}
+        {% if raw is string %}
+          {% set raw = raw | trim | regex_replace('^```[a-zA-Z]*\\s*', '')
+                        | regex_replace('\\s*```$', '') %}
+          {% set raw = raw | from_json(default=[]) if raw else [] %}
+        {% endif %}
+        {{ (raw if raw is list else []) | select('mapping') | list }}
       done: []
       kinds:
         todo: ["To-do", "Aufgabe"]

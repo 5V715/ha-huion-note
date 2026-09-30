@@ -3,6 +3,7 @@ with stand-in AI Task, to-do, calendar and notify services (no API calls)."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 from datetime import datetime
@@ -42,7 +43,11 @@ class Fakes:
 
         async def generate_data(call):
             self.ai.append(call)
-            return {"conversation_id": "x", "data": self.reply}
+            # like Claude under the flat schema: the command list comes as JSON text
+            cmds = self.reply["commands"]
+            return {"conversation_id": "x", "data": {
+                "transcript": self.reply["transcript"],
+                "commands": cmds if isinstance(cmds, str) else json.dumps(cmds)}}
 
         async def get_items(call):
             return {e: {"items": [{"summary": s, "status": "needs_action"}
@@ -139,6 +144,9 @@ async def test_page_is_transcribed(hass: HomeAssistant, fakes) -> None:
     assert '"#todo" or "#aufgabe"' in data["instructions"]
     assert "a line without it is NEVER a command" in data["instructions"]
     assert set(data["structure"]) == {"transcript", "commands"}
+    # only plain text fields: nested objects break Anthropic structured outputs
+    # ("For 'object' type, 'additionalProperties' must be explicitly set to false")
+    assert all(set(f["selector"]) == {"text"} for f in data["structure"].values())
     assert done[0].data["transcript"] == "Buy milk\n- eggs"
     assert mine[0].data["text"] == "Buy milk\n- eggs"
     notes = hass.data["persistent_notification"]
@@ -262,3 +270,20 @@ async def test_pages_without_strokes_are_skipped(hass: HomeAssistant, fakes) -> 
     await _setup(hass)
     await _page(hass, strokes=0)
     assert not fakes.ai
+
+
+async def test_command_json_in_a_code_fence_is_read(hass: HomeAssistant, fakes) -> None:
+    fakes.reply = {"transcript": "…", "commands":
+                   '```json\n[{"type": "todo", "text": "Einkaufen"}]\n```'}
+    await _setup(hass, **ALL_TARGETS)
+    await _page(hass)
+    assert [c.data["item"] for c in fakes.added] == ["Einkaufen"]
+
+
+@pytest.mark.parametrize("bad", ["not json", '{"type": "todo"}', ""])
+async def test_unreadable_command_json_still_shows_the_page(hass: HomeAssistant, fakes, bad) -> None:
+    fakes.reply = {"transcript": "Hello", "commands": bad}
+    await _setup(hass, **ALL_TARGETS)
+    done = await _page(hass)
+    assert not fakes.asks and not fakes.added
+    assert done[0].data["transcript"] == "Hello" and done[0].data["commands"] == []

@@ -23,6 +23,12 @@ integration adds automatic syncing on top of that work.
 > Codebase maintained with [Claude Code](https://claude.ai/code). Not an official Huion
 > product.
 
+**🍺 Buy me a beer (feed my Claude)** — if this saves you some handwriting, a tip keeps
+the tokens flowing. Entirely optional:
+
+[![PayPal 5 €](https://img.shields.io/badge/PayPal-5_€-00457C?logo=paypal&logoColor=white)](https://paypal.me/silasschwarz/5EUR)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/silasschwarz)
+
 ---
 
 ## Installation

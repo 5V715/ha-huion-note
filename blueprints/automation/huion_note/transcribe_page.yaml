@@ -1,66 +1,133 @@
 blueprint:
-  name: Huion Note — transcribe new pages with AI
+  name: Huion Note — transcribe pages and run handwritten commands
   description: >-
-    When the Huion Note X10 integration saves a page, send its PNG to an AI Task
-    entity (e.g. the Anthropic / Claude integration) and turn the handwriting into
-    text. The transcript is shown as a notification, passed to your own actions as
-    `transcript`, and fired as a `huion_note_page_transcribed` event for other
-    automations.
+    When the Huion Note X10 integration saves a page, an AI Task (e.g. Claude via
+    the Anthropic integration) turns the handwriting into text and picks out
+    command lines — a keyword and a colon at the start of a line, in English or
+    German:
 
 
-    Pages must be saved inside a media folder (the integration's default,
-    `<media>/huion_notes`) so the AI Task can read them.
+    `TODO:` / `AUFGABE:` → to-do list · `SHOP:` / `EINKAUF:` → shopping list ·
+    `REMIND <when>:` / `ERINNERUNG <wann>:` → to-do with a due time ·
+    `EVENT <when>:` / `TERMIN <wann>:` → calendar · `SEND:` / `NACHRICHT:` →
+    push message.
+
+
+    Leave an entity empty to switch that command off. Items and events that
+    already exist are not added again when a page is re-synced. Full guide with
+    examples: https://github.com/5V715/ha-huion-note/tree/main/blueprints/automation/huion_note
+
+
+    Pages must be saved inside the media folder (the integration's default).
   domain: automation
   source_url: https://github.com/5V715/ha-huion-note/blob/main/blueprints/automation/huion_note/transcribe_page.yaml
   input:
-    ai_task_entity:
-      name: AI Task entity
-      description: >-
-        The AI Task that reads the page, e.g. "Claude AI Task" from the Anthropic
-        integration. Handwriting needs a strong vision model: in the integration's
-        AI Task settings, untick "recommended settings" and choose Claude Opus 5.5
-        (claude-opus-5-5).
-      selector:
-        entity:
-          filter:
-            domain: ai_task
-    language:
-      name: Language
-      description: Language of your handwriting, or "auto".
-      default: auto
-      selector:
-        text:
-    extra_instructions:
-      name: Extra instructions
-      description: >-
-        Added to the prompt, e.g. "Format to-do items as a checklist" or
-        "Names I often write: …".
-      default: ""
-      selector:
-        text:
-          multiline: true
-    media_dir:
-      name: Media folder
-      description: >-
-        The folder Home Assistant serves as "My media" (`/media` on Home Assistant
-        OS). Page paths are turned into media-source links relative to it.
-      default: /media
-      selector:
-        text:
-    notify:
-      name: Show a notification
-      description: Create a persistent notification with the transcript.
-      default: true
-      selector:
-        boolean:
-    actions:
-      name: Additional actions
-      description: >-
-        Run after each transcription. Available variables: `transcript`, `page`,
-        `png`, `svg`, `json`.
-      default: []
-      selector:
-        action:
+    ai:
+      name: AI
+      input:
+        ai_task_entity:
+          name: AI Task entity
+          description: >-
+            The AI Task that reads the page, e.g. "Claude AI Task" from the
+            Anthropic integration. Handwriting needs a strong vision model: in its
+            settings, untick "recommended settings" and choose Claude Opus 5.5
+            (claude-opus-5-5).
+          selector:
+            entity:
+              filter:
+                domain: ai_task
+        language:
+          name: Language
+          description: Language of your handwriting, or "auto".
+          default: auto
+          selector:
+            text:
+        extra_instructions:
+          name: Extra instructions
+          description: >-
+            Added to the prompt, e.g. "Names I often write: …".
+          default: ""
+          selector:
+            text:
+              multiline: true
+    commands:
+      name: Commands
+      description: Where each command goes. Empty = command off.
+      input:
+        todo_list:
+          name: "TODO: / AUFGABE: → to-do list"
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: todo
+        shopping_list:
+          name: "SHOP: / EINKAUF: → shopping list"
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: todo
+        reminder_list:
+          name: "REMIND: / ERINNERUNG: → to-do list with due times"
+          description: >-
+            Must support due times (e.g. a Local To-do list). The companion app can
+            remind you of due items.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: todo
+        calendar:
+          name: "EVENT: / TERMIN: → calendar"
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: calendar
+        event_duration:
+          name: Default event length (minutes)
+          description: Used when a TERMIN/EVENT line has a start time but no end.
+          default: 60
+          selector:
+            number:
+              min: 5
+              max: 1440
+              unit_of_measurement: min
+        message_action:
+          name: "SEND: / NACHRICHT: → notify action"
+          description: >-
+            A notify action such as `notify.mobile_app_my_phone`. SEND lines are
+            sent again if the page is re-synced after more writing.
+          default: ""
+          selector:
+            text:
+    output:
+      name: Output
+      input:
+        media_dir:
+          name: Media folder
+          description: >-
+            The folder Home Assistant serves as "My media" (`/media` on Home
+            Assistant OS).
+          default: /media
+          selector:
+            text:
+        notify:
+          name: Show a notification
+          description: >-
+            A persistent notification with the transcript and what was done.
+          default: true
+          selector:
+            boolean:
+        actions:
+          name: Additional actions
+          description: >-
+            Run after each page. Variables: `transcript`, `commands`, `done`,
+            `page`, `png`, `svg`, `json`.
+          default: []
+          selector:
+            action:
 
 mode: queued
 max: 20
@@ -79,6 +146,12 @@ variables:
   language: !input language
   extra_instructions: !input extra_instructions
   show_notification: !input notify
+  todo_list: !input todo_list
+  shopping_list: !input shopping_list
+  reminder_list: !input reminder_list
+  calendar_entity: !input calendar
+  event_duration: !input event_duration
+  message_action: !input message_action
   page: "{{ trigger.event.data.page }}"
   png: "{{ trigger.event.data.png }}"
   svg: "{{ trigger.event.data.svg }}"
@@ -99,37 +172,250 @@ actions:
             Huion Note page {{ page }} was saved outside the media folder
             ({{ png }}); set the integration's output folder inside {{ media_dir }}.
       - stop: Page is not in the media folder
+
   - action: ai_task.generate_data
     data:
       task_name: Huion Note page {{ page }}
       entity_id: !input ai_task_entity
       instructions: >-
         The attached image is a page handwritten on a Huion Note X10 smart
-        notebook (black ink on white). Transcribe the handwriting exactly as
-        written{{ '' if language | lower == 'auto' else ' (the text is in ' ~ language ~ ')' }}.
-        Keep line breaks, lists and headings; write crossed-out text as ~~text~~
-        and unreadable words as [?]. Describe drawings or diagrams in one short
-        line in square brackets. Reply with the transcript only.
+        notebook (black ink on white){{ '' if language | lower == 'auto'
+        else ', written in ' ~ language }}. It is now
+        {{ now().strftime('%A, %Y-%m-%d %H:%M') }}.
+
+
+        1. transcript: the handwriting exactly as written. Keep line breaks, lists
+        and headings; write crossed-out text as ~~text~~ and unreadable words as
+        [?]. Describe drawings in one short line in square brackets.
+
+
+        2. commands: only lines that START with one of these keywords followed by a
+        colon (any capitalisation; the time may stand between keyword and colon).
+        Ignore keywords elsewhere, crossed-out lines, and lines you can't read
+        with confidence.
+
+        - "TODO:" or "AUFGABE:" → type todo; text = the task.
+
+        - "SHOP:" or "EINKAUF:" → type shopping; one command per item when the
+        line lists several (separated by commas, "and" or "und").
+
+        - "REMIND <when>:" or "ERINNERUNG <wann>:" → type reminder; text = what
+        to remember; start = the due date and time.
+
+        - "EVENT <when>:" or "TERMIN <wann>:" → type event; text = the title;
+        start (and end, if written) = date and time.
+
+        - "SEND:" or "NACHRICHT:" → type message; text = the message.
+
+
+        Dates and times: resolve relative ones ("tomorrow", "morgen", "fri",
+        "Fr", "next week") from the current date above, always into the future.
+        German-style dates like 12.10. mean day.month. Write start/end as
+        "YYYY-MM-DD HH:MM", or "YYYY-MM-DD" when no time is written. Leave them
+        out for todo, shopping and message. Keep text in the language it was
+        written in.
+
         {{ extra_instructions }}
+      structure:
+        transcript:
+          description: The handwriting as text.
+          required: true
+          selector:
+            text:
+              multiline: true
+        commands:
+          description: Command lines found on the page, in page order. Empty if none.
+          required: true
+          selector:
+            object:
+              multiple: true
+              fields:
+                type:
+                  required: true
+                  selector:
+                    select:
+                      options: [todo, shopping, reminder, event, message]
+                text:
+                  required: true
+                  selector:
+                    text:
+                start:
+                  selector:
+                    text:
+                end:
+                  selector:
+                    text:
       attachments:
         - media_content_id: "{{ media_content_id }}"
           media_content_type: image/png
     response_variable: result
+
   - variables:
-      transcript: "{{ result.data }}"
+      transcript: "{{ result.data.transcript }}"
+      commands: "{{ result.data.commands or [] }}"
+      done: []
+
+  - repeat:
+      for_each: "{{ commands }}"
+      sequence:
+        - variables:
+            cmd: "{{ repeat.item }}"
+            text: "{{ (cmd.text | default('')) | trim }}"
+            list_entity: >-
+              {{ {'todo': todo_list, 'shopping': shopping_list,
+                  'reminder': reminder_list}.get(cmd.type, '') }}
+            has_time: "{{ ' ' in (cmd.start | default('')) | trim }}"
+            start: >-
+              {{ as_local(as_datetime(cmd.start)).isoformat()
+                 if has_time and as_datetime(cmd.start, none) else '' }}
+            start_date: >-
+              {{ (cmd.start | default(''))[:10]
+                 if not has_time and as_datetime(cmd.start | default(''), none) else '' }}
+        - choose:
+            # --- to-do, shopping, reminder: todo lists, skip existing items ---
+            - conditions: "{{ cmd.type in ['todo', 'shopping', 'reminder'] and text != '' }}"
+              sequence:
+                - if: "{{ list_entity == '' }}"
+                  then:
+                    - variables:
+                        done: "{{ done + ['⏭ ' ~ text ~ ' (no list set for ' ~ cmd.type ~ ')'] }}"
+                  else:
+                    - action: todo.get_items
+                      target:
+                        entity_id: "{{ list_entity }}"
+                      data:
+                        status: [needs_action, completed]
+                      response_variable: existing
+                    - variables:
+                        known: >-
+                          {{ existing[list_entity]['items'] | map(attribute='summary')
+                             | map('lower') | list }}
+                    - if: "{{ text | lower in known }}"
+                      then:
+                        - variables:
+                            done: "{{ done + ['↺ ' ~ text ~ ' (already on the list)'] }}"
+                      else:
+                        - if: "{{ cmd.type == 'reminder' and start != '' }}"
+                          then:
+                            - action: todo.add_item
+                              target:
+                                entity_id: "{{ list_entity }}"
+                              data:
+                                item: "{{ text }}"
+                                due_datetime: "{{ start }}"
+                          else:
+                            - if: "{{ cmd.type == 'reminder' and start_date != '' }}"
+                              then:
+                                - action: todo.add_item
+                                  target:
+                                    entity_id: "{{ list_entity }}"
+                                  data:
+                                    item: "{{ text }}"
+                                    due_date: "{{ start_date }}"
+                              else:
+                                - action: todo.add_item
+                                  target:
+                                    entity_id: "{{ list_entity }}"
+                                  data:
+                                    item: "{{ text }}"
+                        - variables:
+                            done: >-
+                              {{ done + ['✓ ' ~ text ~ ((' — ' ~ cmd.start) if cmd.type == 'reminder'
+                                 and cmd.start | default('') else '')] }}
+
+            # --- event: calendar, skip if an event with this title exists then ---
+            - conditions: "{{ cmd.type == 'event' and text != '' }}"
+              sequence:
+                - if: "{{ calendar_entity == '' or (start == '' and start_date == '') }}"
+                  then:
+                    - variables:
+                        done: >-
+                          {{ done + ['⏭ ' ~ text ~ (' (no calendar set)' if calendar_entity == ''
+                             else ' (no date found)')] }}
+                  else:
+                    - variables:
+                        end: >-
+                          {% if start == '' %}{{ '' }}
+                          {% elif ' ' in (cmd.end | default('')) | trim and as_datetime(cmd.end, none) %}{{ as_local(as_datetime(cmd.end)).isoformat() }}
+                          {% else %}{{ (as_datetime(start) + timedelta(minutes=event_duration | int)).isoformat() }}{% endif %}
+                        window_start: "{{ start if start != '' else start_date ~ 'T00:00:00' }}"
+                        window_end: >-
+                          {{ end if start != ''
+                             else (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00') }}
+                    - action: calendar.get_events
+                      target:
+                        entity_id: "{{ calendar_entity }}"
+                      data:
+                        start_date_time: "{{ window_start }}"
+                        end_date_time: "{{ window_end }}"
+                      response_variable: found
+                    - if: >-
+                        {{ text | lower in (found[calendar_entity].events
+                           | map(attribute='summary') | map('lower') | list) }}
+                      then:
+                        - variables:
+                            done: "{{ done + ['↺ ' ~ text ~ ' (already in the calendar)'] }}"
+                      else:
+                        - if: "{{ start != '' }}"
+                          then:
+                            - action: calendar.create_event
+                              target:
+                                entity_id: "{{ calendar_entity }}"
+                              data:
+                                summary: "{{ text }}"
+                                start_date_time: "{{ start }}"
+                                end_date_time: "{{ end }}"
+                          else:
+                            - action: calendar.create_event
+                              target:
+                                entity_id: "{{ calendar_entity }}"
+                              data:
+                                summary: "{{ text }}"
+                                start_date: "{{ start_date }}"
+                                end_date: >-
+                                  {{ (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%d') }}
+                        - variables:
+                            done: "{{ done + ['📅 ' ~ text ~ ' — ' ~ cmd.start] }}"
+
+            # --- message: notify action ---
+            - conditions: "{{ cmd.type == 'message' and text != '' }}"
+              sequence:
+                - if: "{{ message_action == '' }}"
+                  then:
+                    - variables:
+                        done: "{{ done + ['⏭ ' ~ text ~ ' (no notify action set)'] }}"
+                  else:
+                    - action: "{{ message_action }}"
+                      data:
+                        title: Huion Note
+                        message: "{{ text }}"
+                    - variables:
+                        done: "{{ done + ['✉ ' ~ text] }}"
+
   - event: huion_note_page_transcribed
     event_data:
       page: "{{ page }}"
       transcript: "{{ transcript }}"
+      commands: "{{ commands }}"
+      done: "{{ done }}"
       png: "{{ png }}"
       svg: "{{ svg }}"
       json: "{{ json }}"
+
   - if: "{{ show_notification }}"
     then:
       - action: persistent_notification.create
         data:
           title: Huion Note — page {{ page }}
-          message: "{{ transcript }}"
+          message: >-
+            {{ transcript }}{% if done %}
+
+
+            **Commands**
+
+            {% for line in done %}- {{ line }}
+            {% endfor %}{% endif %}
           notification_id: huion_note_{{ png.split('/')[-1] }}
+
   - choose: []
     default: !input actions

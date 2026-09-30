@@ -100,6 +100,25 @@ automation:
           message: "{{ trigger.event.data.new_pages }} new page(s) from the notebook"
 ```
 
+**Transcribe pages with Claude** — a ready-made blueprint sends every new page to an
+[AI Task](https://www.home-assistant.io/integrations/ai_task/) (e.g. the
+[Anthropic integration](https://www.home-assistant.io/integrations/anthropic/)) and
+turns the handwriting into text:
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F5V715%2Fha-huion-note%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fhuion_note%2Ftranscribe_page.yaml)
+
+1. Set up the Anthropic integration with an API key; it adds a "Claude AI Task" entity.
+   Its default model is small — for handwriting, open the AI Task's settings, untick
+   *recommended settings* and pick **Claude Opus 5.5** (`claude-opus-5-5`).
+2. Import the blueprint and create an automation from it: pick the AI Task entity,
+   your handwriting's language and, optionally, extra instructions or actions.
+3. Each new page with strokes then produces a notification with the transcript and a
+   `huion_note_page_transcribed` event (`{page, transcript, png, svg, json}`); your
+   own actions get the text as `transcript`.
+
+Pages must be saved inside the media folder (the default) so the AI Task can read them.
+Each page is one API request with one image.
+
 **Caveats**
 
 - **Bluetooth link.** The firmware's duplicate MTU-request bug (see
@@ -111,10 +130,9 @@ automation:
   advertising. A notebook that is paired/connected to another device (e.g. a phone
   running the Huion app) may not advertise; disconnect it there.
 - The page protocol, decoder and dedupe/delete logic are covered by tests
-  (`pytest`, see `requirements_test.txt`), and the protocol was validated on hardware
-  by this project's earlier Linux CLI and Android app (see git history) — but the
-  bleak transport inside Home Assistant has not yet been run against a real
-  notebook. Reports welcome.
+  (`pytest`, see `requirements_test.txt`). Syncing has been verified on hardware on
+  a Raspberry Pi with its onboard adapter; other adapters and proxies: reports
+  welcome.
 
 ---
 
@@ -229,6 +247,7 @@ reverse-engineering log: [`docs/notes/journey.md`](docs/notes/journey.md).
 custom_components/huion_note/          — the integration (install this)
 custom_components/huion_note/protocol/ — pure protocol core: framing, auth, codec, session, render
 tests/                                 — pytest suite (pytest-homeassistant-custom-component)
+blueprints/automation/huion_note/      — automation blueprint: transcribe pages with an AI Task
 patches/                               — BlueZ att.c patch for the firmware MTU bug
 docs/                                  — protocol map, specs, overview, RE log (docs/notes/)
 ```

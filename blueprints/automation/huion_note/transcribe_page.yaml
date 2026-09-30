@@ -1,0 +1,135 @@
+blueprint:
+  name: Huion Note — transcribe new pages with AI
+  description: >-
+    When the Huion Note X10 integration saves a page, send its PNG to an AI Task
+    entity (e.g. the Anthropic / Claude integration) and turn the handwriting into
+    text. The transcript is shown as a notification, passed to your own actions as
+    `transcript`, and fired as a `huion_note_page_transcribed` event for other
+    automations.
+
+
+    Pages must be saved inside a media folder (the integration's default,
+    `<media>/huion_notes`) so the AI Task can read them.
+  domain: automation
+  source_url: https://github.com/5V715/ha-huion-note/blob/main/blueprints/automation/huion_note/transcribe_page.yaml
+  input:
+    ai_task_entity:
+      name: AI Task entity
+      description: >-
+        The AI Task that reads the page, e.g. "Claude AI Task" from the Anthropic
+        integration. Handwriting needs a strong vision model: in the integration's
+        AI Task settings, untick "recommended settings" and choose Claude Opus 5.5
+        (claude-opus-5-5).
+      selector:
+        entity:
+          filter:
+            domain: ai_task
+    language:
+      name: Language
+      description: Language of your handwriting, or "auto".
+      default: auto
+      selector:
+        text:
+    extra_instructions:
+      name: Extra instructions
+      description: >-
+        Added to the prompt, e.g. "Format to-do items as a checklist" or
+        "Names I often write: …".
+      default: ""
+      selector:
+        text:
+          multiline: true
+    media_dir:
+      name: Media folder
+      description: >-
+        The folder Home Assistant serves as "My media" (`/media` on Home Assistant
+        OS). Page paths are turned into media-source links relative to it.
+      default: /media
+      selector:
+        text:
+    notify:
+      name: Show a notification
+      description: Create a persistent notification with the transcript.
+      default: true
+      selector:
+        boolean:
+    actions:
+      name: Additional actions
+      description: >-
+        Run after each transcription. Available variables: `transcript`, `page`,
+        `png`, `svg`, `json`.
+      default: []
+      selector:
+        action:
+
+mode: queued
+max: 20
+
+triggers:
+  - trigger: event
+    event_type: huion_note_page_saved
+
+conditions:
+  # Pages without strokes (dots only) have nothing to read.
+  - condition: template
+    value_template: "{{ trigger.event.data.strokes | int(0) > 0 }}"
+
+variables:
+  media_dir: !input media_dir
+  language: !input language
+  extra_instructions: !input extra_instructions
+  show_notification: !input notify
+  page: "{{ trigger.event.data.page }}"
+  png: "{{ trigger.event.data.png }}"
+  svg: "{{ trigger.event.data.svg }}"
+  json: "{{ trigger.event.data.json }}"
+  media_root: "{{ media_dir.rstrip('/') ~ '/' }}"
+  media_content_id: >-
+    {{ 'media-source://media_source/local/' ~ png[media_root | length:]
+       if png.startswith(media_root) else '' }}
+
+actions:
+  - if: "{{ media_content_id == '' }}"
+    then:
+      - action: system_log.write
+        data:
+          level: warning
+          logger: blueprints.huion_note.transcribe_page
+          message: >-
+            Huion Note page {{ page }} was saved outside the media folder
+            ({{ png }}); set the integration's output folder inside {{ media_dir }}.
+      - stop: Page is not in the media folder
+  - action: ai_task.generate_data
+    data:
+      task_name: Huion Note page {{ page }}
+      entity_id: !input ai_task_entity
+      instructions: >-
+        The attached image is a page handwritten on a Huion Note X10 smart
+        notebook (black ink on white). Transcribe the handwriting exactly as
+        written{{ '' if language | lower == 'auto' else ' (the text is in ' ~ language ~ ')' }}.
+        Keep line breaks, lists and headings; write crossed-out text as ~~text~~
+        and unreadable words as [?]. Describe drawings or diagrams in one short
+        line in square brackets. Reply with the transcript only.
+        {{ extra_instructions }}
+      attachments:
+        - media_content_id: "{{ media_content_id }}"
+          media_content_type: image/png
+    response_variable: result
+  - variables:
+      transcript: "{{ result.data }}"
+  - event: huion_note_page_transcribed
+    event_data:
+      page: "{{ page }}"
+      transcript: "{{ transcript }}"
+      png: "{{ png }}"
+      svg: "{{ svg }}"
+      json: "{{ json }}"
+  - if: "{{ show_notification }}"
+    then:
+      - action: persistent_notification.create
+        data:
+          title: Huion Note — page {{ page }}
+          message: "{{ transcript }}"
+          notification_id: huion_note_{{ png.split('/')[-1] }}
+  - choose: []
+    default: !input actions

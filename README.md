@@ -103,9 +103,11 @@ automation:
 **Transcribe pages and run handwritten commands with Claude** — a ready-made
 blueprint sends every new page to an [AI Task](https://www.home-assistant.io/integrations/ai_task/)
 (e.g. the [Anthropic integration](https://www.home-assistant.io/integrations/anthropic/)),
-turns the handwriting into text and carries out lines like `TODO:` / `AUFGABE:`,
-`SHOP:` / `EINKAUF:`, `REMIND fri 18:00:` / `ERINNERUNG Fr 18:00:`, `EVENT …:` /
-`TERMIN …:` and `SEND:` / `NACHRICHT:` (to-do lists, calendar, push messages).
+turns the handwriting into text and carries out lines that start with `#`:
+`#todo` / `#aufgabe`, `#shop` / `#einkauf`, `#remind fri 18:00` /
+`#erinnerung Fr 18:00`, `#event …` / `#termin …` and `#send` / `#nachricht`
+(to-do lists, calendar, push messages). Lines without `#` are always just text, and
+every command except `#send` waits for a ✓ on your phone before it runs.
 Commands, examples and setup in English and German:
 [`blueprints/automation/huion_note/README.md`](blueprints/automation/huion_note/README.md).
 

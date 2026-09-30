@@ -3,18 +3,20 @@ blueprint:
   description: >-
     When the Huion Note X10 integration saves a page, an AI Task (e.g. Claude via
     the Anthropic integration) turns the handwriting into text and picks out
-    command lines — a keyword and a colon at the start of a line, in English or
-    German:
+    commands — lines that start with `#` and a keyword, in English or German.
+    Without the `#` a line is always just text:
 
 
-    `TODO:` / `AUFGABE:` → to-do list · `SHOP:` / `EINKAUF:` → shopping list ·
-    `REMIND <when>:` / `ERINNERUNG <wann>:` → to-do with a due time ·
-    `EVENT <when>:` / `TERMIN <wann>:` → calendar · `SEND:` / `NACHRICHT:` →
+    `#todo` / `#aufgabe` → to-do list · `#shop` / `#einkauf` → shopping list ·
+    `#remind <when>` / `#erinnerung <wann>` → to-do with a due time ·
+    `#event <when>` / `#termin <wann>` → calendar · `#send` / `#nachricht` →
     push message.
 
 
-    Leave an entity empty to switch that command off. Items and events that
-    already exist are not added again when a page is re-synced. Full guide with
+    Every command except `#send` / `#nachricht` first asks on your phone (✓ / ✗)
+    and only runs once you confirm. Leave an entity empty to switch that command
+    off. Items and events that already exist are not asked about again when a page
+    is re-synced. Full guide with
     examples: https://github.com/5V715/ha-huion-note/tree/main/blueprints/automation/huion_note
 
 
@@ -55,21 +57,21 @@ blueprint:
       description: Where each command goes. Empty = command off.
       input:
         todo_list:
-          name: "TODO: / AUFGABE: → to-do list"
+          name: "#todo / #aufgabe → to-do list"
           default: ""
           selector:
             entity:
               filter:
                 domain: todo
         shopping_list:
-          name: "SHOP: / EINKAUF: → shopping list"
+          name: "#shop / #einkauf → shopping list"
           default: ""
           selector:
             entity:
               filter:
                 domain: todo
         reminder_list:
-          name: "REMIND: / ERINNERUNG: → to-do list with due times"
+          name: "#remind / #erinnerung → to-do list with due times"
           description: >-
             Must support due times (e.g. a Local To-do list). The companion app can
             remind you of due items.
@@ -79,7 +81,7 @@ blueprint:
               filter:
                 domain: todo
         calendar:
-          name: "EVENT: / TERMIN: → calendar"
+          name: "#event / #termin → calendar"
           default: ""
           selector:
             entity:
@@ -87,7 +89,7 @@ blueprint:
                 domain: calendar
         event_duration:
           name: Default event length (minutes)
-          description: Used when a TERMIN/EVENT line has a start time but no end.
+          description: Used when an #event / #termin line has a start time but no end.
           default: 60
           selector:
             number:
@@ -95,13 +97,33 @@ blueprint:
               max: 1440
               unit_of_measurement: min
         message_action:
-          name: "SEND: / NACHRICHT: → notify action"
+          name: Phone (notify action)
           description: >-
-            A notify action such as `notify.mobile_app_my_phone`. SEND lines are
-            sent again if the page is re-synced after more writing.
+            The companion-app notify action, e.g. `notify.mobile_app_my_phone`.
+            Receives the confirmation questions and `#send` / `#nachricht`
+            messages. Required for commands: without it, commands are skipped.
           default: ""
           selector:
             text:
+        confirm_timeout:
+          name: Confirmation timeout
+          description: A command not confirmed within this time is dropped.
+          default: 60
+          selector:
+            number:
+              min: 1
+              max: 1440
+              unit_of_measurement: min
+        notification_language:
+          name: Language of the confirmation messages
+          default: en
+          selector:
+            select:
+              options:
+                - label: English
+                  value: en
+                - label: Deutsch
+                  value: de
     output:
       name: Output
       input:
@@ -129,8 +151,9 @@ blueprint:
           selector:
             action:
 
-mode: queued
-max: 20
+# parallel: a page waiting for confirmations must not hold up the next page
+mode: parallel
+max: 10
 
 triggers:
   - trigger: event
@@ -152,6 +175,9 @@ variables:
   calendar_entity: !input calendar
   event_duration: !input event_duration
   message_action: !input message_action
+  confirm_timeout: !input confirm_timeout
+  notification_language: !input notification_language
+  de: "{{ notification_language == 'de' }}"
   page: "{{ trigger.event.data.page }}"
   png: "{{ trigger.event.data.png }}"
   svg: "{{ trigger.event.data.svg }}"
@@ -189,23 +215,27 @@ actions:
         [?]. Describe drawings in one short line in square brackets.
 
 
-        2. commands: only lines that START with one of these keywords followed by a
-        colon (any capitalisation; the time may stand between keyword and colon).
-        Ignore keywords elsewhere, crossed-out lines, and lines you can't read
-        with confidence.
+        2. commands: a command is a line that STARTS with "#" directly followed by
+        one of the keywords below (any capitalisation). The "#" is mandatory: a
+        line without it is NEVER a command, even if it starts with a keyword or
+        reads like a task ("todo: call mum", "Einkauf Milch" are plain notes).
+        Also ignore "#" words in the middle of a line, crossed-out lines, and
+        lines you can't read with confidence. After the keyword comes the time
+        (for reminders and events), then the text; a colon or dash in between is
+        optional.
 
-        - "TODO:" or "AUFGABE:" → type todo; text = the task.
+        - "#todo" or "#aufgabe" → type todo; text = the task.
 
-        - "SHOP:" or "EINKAUF:" → type shopping; one command per item when the
+        - "#shop" or "#einkauf" → type shopping; one command per item when the
         line lists several (separated by commas, "and" or "und").
 
-        - "REMIND <when>:" or "ERINNERUNG <wann>:" → type reminder; text = what
+        - "#remind <when>" or "#erinnerung <wann>" → type reminder; text = what
         to remember; start = the due date and time.
 
-        - "EVENT <when>:" or "TERMIN <wann>:" → type event; text = the title;
+        - "#event <when>" or "#termin <wann>" → type event; text = the title;
         start (and end, if written) = date and time.
 
-        - "SEND:" or "NACHRICHT:" → type message; text = the message.
+        - "#send" or "#nachricht" → type message; text = the message.
 
 
         Dates and times: resolve relative ones ("tomorrow", "morgen", "fri",
@@ -254,6 +284,12 @@ actions:
       transcript: "{{ result.data.transcript }}"
       commands: "{{ result.data.commands or [] }}"
       done: []
+      kinds:
+        todo: ["To-do", "Aufgabe"]
+        shopping: ["Shopping list", "Einkaufsliste"]
+        reminder: ["Reminder", "Erinnerung"]
+        event: ["Event", "Termin"]
+        message: ["Message", "Nachricht"]
 
   - repeat:
       for_each: "{{ commands }}"
@@ -261,9 +297,14 @@ actions:
         - variables:
             cmd: "{{ repeat.item }}"
             text: "{{ (cmd.text | default('')) | trim }}"
+            kind: "{{ kinds.get(cmd.type, ['?', '?'])[1 if de else 0] }}"
+            when: >-
+              {{ (cmd.start | default('')) ~ ((' – ' ~ cmd.end) if cmd.end | default('') else '') }}
+            label: "{{ kind ~ ': ' ~ text ~ ((' — ' ~ when) if when else '') }}"
+            ask_id: "{{ png.split('/')[-1].rsplit('.', 1)[0] ~ '_' ~ repeat.index }}"
             list_entity: >-
               {{ {'todo': todo_list, 'shopping': shopping_list,
-                  'reminder': reminder_list}.get(cmd.type, '') }}
+                  'reminder': reminder_list, 'event': calendar_entity}.get(cmd.type, '') }}
             has_time: "{{ ' ' in (cmd.start | default('')) | trim }}"
             start: >-
               {{ as_local(as_datetime(cmd.start)).isoformat()
@@ -271,126 +312,172 @@ actions:
             start_date: >-
               {{ (cmd.start | default(''))[:10]
                  if not has_time and as_datetime(cmd.start | default(''), none) else '' }}
-        - choose:
-            # --- to-do, shopping, reminder: todo lists, skip existing items ---
-            - conditions: "{{ cmd.type in ['todo', 'shopping', 'reminder'] and text != '' }}"
-              sequence:
-                - if: "{{ list_entity == '' }}"
-                  then:
-                    - variables:
-                        done: "{{ done + ['⏭ ' ~ text ~ ' (no list set for ' ~ cmd.type ~ ')'] }}"
-                  else:
-                    - action: todo.get_items
-                      target:
-                        entity_id: "{{ list_entity }}"
-                      data:
-                        status: [needs_action, completed]
-                      response_variable: existing
-                    - variables:
-                        known: >-
-                          {{ existing[list_entity]['items'] | map(attribute='summary')
-                             | map('lower') | list }}
-                    - if: "{{ text | lower in known }}"
-                      then:
-                        - variables:
-                            done: "{{ done + ['↺ ' ~ text ~ ' (already on the list)'] }}"
-                      else:
-                        - if: "{{ cmd.type == 'reminder' and start != '' }}"
-                          then:
-                            - action: todo.add_item
-                              target:
-                                entity_id: "{{ list_entity }}"
-                              data:
-                                item: "{{ text }}"
-                                due_datetime: "{{ start }}"
-                          else:
-                            - if: "{{ cmd.type == 'reminder' and start_date != '' }}"
-                              then:
-                                - action: todo.add_item
-                                  target:
-                                    entity_id: "{{ list_entity }}"
-                                  data:
-                                    item: "{{ text }}"
-                                    due_date: "{{ start_date }}"
-                              else:
-                                - action: todo.add_item
-                                  target:
-                                    entity_id: "{{ list_entity }}"
-                                  data:
-                                    item: "{{ text }}"
-                        - variables:
-                            done: >-
-                              {{ done + ['✓ ' ~ text ~ ((' — ' ~ cmd.start) if cmd.type == 'reminder'
-                                 and cmd.start | default('') else '')] }}
+            state: go
 
-            # --- event: calendar, skip if an event with this title exists then ---
-            - conditions: "{{ cmd.type == 'event' and text != '' }}"
+        # --- can it run at all? ---
+        - variables:
+            state: >-
+              {% if text == '' or cmd.type not in kinds %}skip:unreadable
+              {% elif message_action == '' %}skip:{{ 'kein Handy eingerichtet' if de else 'no phone set' }}
+              {% elif cmd.type != 'message' and list_entity == '' %}skip:{{ 'kein Ziel eingerichtet' if de else 'no target set' }}
+              {% elif cmd.type == 'event' and start == '' and start_date == '' %}skip:{{ 'kein Datum erkannt' if de else 'no date found' }}
+              {% else %}go{% endif %}
+
+        # --- does it exist already (page re-synced after more writing)? ---
+        - if: "{{ state == 'go' and cmd.type in ['todo', 'shopping', 'reminder'] }}"
+          then:
+            - action: todo.get_items
+              target:
+                entity_id: "{{ list_entity }}"
+              data:
+                status: [needs_action, completed]
+              response_variable: existing
+            - if: >-
+                {{ text | lower in (existing[list_entity]['items']
+                   | map(attribute='summary') | map('lower') | list) }}
+              then:
+                - variables:
+                    state: exists
+        - if: "{{ state == 'go' and cmd.type == 'event' }}"
+          then:
+            - variables:
+                end: >-
+                  {% if start == '' %}{{ '' }}
+                  {% elif ' ' in (cmd.end | default('')) | trim and as_datetime(cmd.end, none) %}{{ as_local(as_datetime(cmd.end)).isoformat() }}
+                  {% else %}{{ (as_datetime(start) + timedelta(minutes=event_duration | int)).isoformat() }}{% endif %}
+                window_start: "{{ start if start != '' else start_date ~ 'T00:00:00' }}"
+                window_end: >-
+                  {{ end if start != ''
+                     else (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00') }}
+            - action: calendar.get_events
+              target:
+                entity_id: "{{ calendar_entity }}"
+              data:
+                start_date_time: "{{ window_start }}"
+                end_date_time: "{{ window_end }}"
+              response_variable: found
+            - if: >-
+                {{ text | lower in (found[calendar_entity].events
+                   | map(attribute='summary') | map('lower') | list) }}
+              then:
+                - variables:
+                    state: exists
+
+        # --- ask on the phone (not for #send: the message is the push) ---
+        - if: "{{ state == 'go' and cmd.type != 'message' }}"
+          then:
+            - action: "{{ message_action }}"
+              data:
+                title: "{{ 'Huion Note — ausführen?' if de else 'Huion Note — run this?' }}"
+                message: "{{ label }}"
+                data:
+                  tag: "{{ ask_id }}"
+                  actions:
+                    - action: "{{ ask_id }}_ok"
+                      title: "{{ '✓ Ja' if de else '✓ Yes' }}"
+                    - action: "{{ ask_id }}_no"
+                      title: "{{ '✗ Nein' if de else '✗ No' }}"
+            - wait_for_trigger:
+                - trigger: event
+                  event_type: mobile_app_notification_action
+                  event_data:
+                    action: "{{ ask_id }}_ok"
+                - trigger: event
+                  event_type: mobile_app_notification_action
+                  event_data:
+                    action: "{{ ask_id }}_no"
+              timeout:
+                minutes: "{{ confirm_timeout | int }}"
+              continue_on_timeout: true
+            - if: "{{ wait.trigger is none }}"
+              then:
+                - variables:
+                    state: timeout
+                - action: "{{ message_action }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ ask_id }}"
+              else:
+                - variables:
+                    state: >-
+                      {{ 'go' if wait.trigger.event.data.action == ask_id ~ '_ok' else 'declined' }}
+
+        # --- run it ---
+        - choose:
+            - conditions: "{{ state.startswith('skip:') }}"
               sequence:
-                - if: "{{ calendar_entity == '' or (start == '' and start_date == '') }}"
+                - variables:
+                    done: "{{ done + ['⏭ ' ~ label ~ ' (' ~ state[5:] ~ ')'] }}"
+            - conditions: "{{ state == 'exists' }}"
+              sequence:
+                - variables:
+                    done: "{{ done + ['↺ ' ~ label ~ (' (schon vorhanden)' if de else ' (already there)')] }}"
+            - conditions: "{{ state == 'declined' }}"
+              sequence:
+                - variables:
+                    done: "{{ done + ['✗ ' ~ label ~ (' (abgelehnt)' if de else ' (declined)')] }}"
+            - conditions: "{{ state == 'timeout' }}"
+              sequence:
+                - variables:
+                    done: "{{ done + ['✗ ' ~ label ~ (' (nicht bestätigt)' if de else ' (not confirmed)')] }}"
+            - conditions: "{{ cmd.type == 'message' }}"
+              sequence:
+                - action: "{{ message_action }}"
+                  data:
+                    title: Huion Note
+                    message: "{{ text }}"
+                - variables:
+                    done: "{{ done + ['✉ ' ~ text] }}"
+            - conditions: "{{ cmd.type == 'event' }}"
+              sequence:
+                - if: "{{ start != '' }}"
                   then:
-                    - variables:
-                        done: >-
-                          {{ done + ['⏭ ' ~ text ~ (' (no calendar set)' if calendar_entity == ''
-                             else ' (no date found)')] }}
-                  else:
-                    - variables:
-                        end: >-
-                          {% if start == '' %}{{ '' }}
-                          {% elif ' ' in (cmd.end | default('')) | trim and as_datetime(cmd.end, none) %}{{ as_local(as_datetime(cmd.end)).isoformat() }}
-                          {% else %}{{ (as_datetime(start) + timedelta(minutes=event_duration | int)).isoformat() }}{% endif %}
-                        window_start: "{{ start if start != '' else start_date ~ 'T00:00:00' }}"
-                        window_end: >-
-                          {{ end if start != ''
-                             else (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%dT00:00:00') }}
-                    - action: calendar.get_events
+                    - action: calendar.create_event
                       target:
                         entity_id: "{{ calendar_entity }}"
                       data:
-                        start_date_time: "{{ window_start }}"
-                        end_date_time: "{{ window_end }}"
-                      response_variable: found
-                    - if: >-
-                        {{ text | lower in (found[calendar_entity].events
-                           | map(attribute='summary') | map('lower') | list) }}
-                      then:
-                        - variables:
-                            done: "{{ done + ['↺ ' ~ text ~ ' (already in the calendar)'] }}"
-                      else:
-                        - if: "{{ start != '' }}"
-                          then:
-                            - action: calendar.create_event
-                              target:
-                                entity_id: "{{ calendar_entity }}"
-                              data:
-                                summary: "{{ text }}"
-                                start_date_time: "{{ start }}"
-                                end_date_time: "{{ end }}"
-                          else:
-                            - action: calendar.create_event
-                              target:
-                                entity_id: "{{ calendar_entity }}"
-                              data:
-                                summary: "{{ text }}"
-                                start_date: "{{ start_date }}"
-                                end_date: >-
-                                  {{ (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%d') }}
-                        - variables:
-                            done: "{{ done + ['📅 ' ~ text ~ ' — ' ~ cmd.start] }}"
-
-            # --- message: notify action ---
-            - conditions: "{{ cmd.type == 'message' and text != '' }}"
-              sequence:
-                - if: "{{ message_action == '' }}"
-                  then:
-                    - variables:
-                        done: "{{ done + ['⏭ ' ~ text ~ ' (no notify action set)'] }}"
+                        summary: "{{ text }}"
+                        start_date_time: "{{ start }}"
+                        end_date_time: "{{ end }}"
                   else:
-                    - action: "{{ message_action }}"
+                    - action: calendar.create_event
+                      target:
+                        entity_id: "{{ calendar_entity }}"
                       data:
-                        title: Huion Note
-                        message: "{{ text }}"
-                    - variables:
-                        done: "{{ done + ['✉ ' ~ text] }}"
+                        summary: "{{ text }}"
+                        start_date: "{{ start_date }}"
+                        end_date: >-
+                          {{ (as_datetime(start_date) + timedelta(days=1)).strftime('%Y-%m-%d') }}
+                - variables:
+                    done: "{{ done + ['📅 ' ~ label] }}"
+          default:
+            # todo, shopping, reminder
+            - if: "{{ cmd.type == 'reminder' and start != '' }}"
+              then:
+                - action: todo.add_item
+                  target:
+                    entity_id: "{{ list_entity }}"
+                  data:
+                    item: "{{ text }}"
+                    due_datetime: "{{ start }}"
+              else:
+                - if: "{{ cmd.type == 'reminder' and start_date != '' }}"
+                  then:
+                    - action: todo.add_item
+                      target:
+                        entity_id: "{{ list_entity }}"
+                      data:
+                        item: "{{ text }}"
+                        due_date: "{{ start_date }}"
+                  else:
+                    - action: todo.add_item
+                      target:
+                        entity_id: "{{ list_entity }}"
+                      data:
+                        item: "{{ text }}"
+            - variables:
+                done: "{{ done + ['✓ ' ~ label] }}"
 
   - event: huion_note_page_transcribed
     event_data:
@@ -411,7 +498,7 @@ actions:
             {{ transcript }}{% if done %}
 
 
-            **Commands**
+            **{{ 'Befehle' if de else 'Commands' }}**
 
             {% for line in done %}- {{ line }}
             {% endfor %}{% endif %}

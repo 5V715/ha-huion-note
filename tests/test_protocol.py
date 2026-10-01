@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from custom_components.huion_note.pages import is_saved, page_digest, write_page
+from custom_components.huion_note.pages import is_saved, media_content_id, page_digest, write_page
 from custom_components.huion_note.protocol import auth, codec, frames, render
 from custom_components.huion_note.protocol.errors import AuthFailed, PinRequired, TransportClosed
 from custom_components.huion_note.protocol.frames import OrderCode
@@ -303,3 +303,17 @@ def test_faint_points_end_a_stroke_but_stay_in_the_page():
     assert codec.points_to_strokes(pts) == [pts]  # no threshold: unchanged
     pkt_page = codec.decode_page([], codec.Limits(), 0)
     assert pkt_page.max_press == 8191.0
+
+
+def test_media_content_id_uses_the_folder_the_page_is_in(tmp_path):
+    notes, media = tmp_path / "notes", tmp_path / "media"
+    dirs = {"local": str(media), "notes": str(notes), "deep": str(notes / "huion")}
+    assert media_content_id(str(notes / "p.png"), dirs) == "media-source://media_source/notes/p.png"
+    assert media_content_id(str(media / "huion_notes" / "p.png"), dirs) == \
+        "media-source://media_source/local/huion_notes/p.png"
+    # the most specific media folder wins
+    assert media_content_id(str(notes / "huion" / "p.png"), dirs) == \
+        "media-source://media_source/deep/p.png"
+    # a folder that isn't a media folder (or only shares a name prefix) has no link
+    assert media_content_id(str(tmp_path / "notes2" / "p.png"), dirs) == ""
+    assert media_content_id("/elsewhere/p.png", dirs) == ""

@@ -104,6 +104,8 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
     saved_events = async_capture_events(hass, EVENT_PAGE_SAVED)
     done_events = async_capture_events(hass, EVENT_SYNC_FINISHED)
 
+    # pages go to the configured output folder, here a media folder of its own
+    hass.config.media_dirs = {"local": "/media", "notes": str(tmp_path)}
     tablet = FakeTablet(handshake(bat=64, pages=1) + [count(1), p87(1), count(2), p87(1), p87(2, x=3)])
     t_patch, d_patch = _patch_tablet(tablet)
     with t_patch as bt, d_patch:
@@ -116,6 +118,9 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
     assert tablet.connected and tablet.closed
     assert len(saved_events) == 2
     assert all(os.path.isfile(e.data["png"]) for e in saved_events)
+    # a ready-made media link for the AI Task, matching the folder the page is in
+    assert all(e.data["media_content_id"] == "media-source://media_source/notes/"
+               + os.path.basename(e.data["png"]) for e in saved_events)
     assert done_events[0].data["new_pages"] == 2
     assert not tablet.ops(OrderCode.DELETE_PAGE)  # delete-after-sync is off by default
     # like the app, say goodbye before closing the link

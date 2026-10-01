@@ -103,6 +103,24 @@ done (✓ added · 📅 event · ✉ sent · ✗ declined or not confirmed · �
 `huion_note_page_transcribed` event carries `transcript`, `commands` and `done` for
 your own automations.
 
+### Own output folder
+
+The AI Task can only read pages inside a Home Assistant **media folder**. The
+integration's default (`/media/huion_notes`) is one. If you set another output folder
+in the integration's options, e.g. `/notes`, register it in `configuration.yaml` and
+restart Home Assistant:
+
+```yaml
+homeassistant:
+  media_dirs:
+    local: /media      # keep the default — this list replaces it
+    notes: /notes
+```
+
+The integration then finds the right media folder for each page by itself; there is
+nothing to set in the blueprint. If a page is outside every media folder, the
+automation stops with a warning in the log.
+
 ---
 
 ## Deutsch
@@ -208,3 +226,21 @@ Nach jeder Seite gibt es eine Benachrichtigung mit dem Text und einer Liste, was
 passiert ist (✓ hinzugefügt · 📅 Termin · ✉ gesendet · ✗ abgelehnt oder nicht
 bestätigt · ↺ schon vorhanden · ⏭ übersprungen, nicht eingerichtet). Das Event `huion_note_page_transcribed` enthält
 `transcript`, `commands` und `done` für eigene Automationen.
+
+### Eigener Ausgabeordner
+
+Das AI Task kann nur Seiten in einem **Medienordner** von Home Assistant lesen. Der
+Standard der Integration (`/media/huion_notes`) ist einer. Wenn du in den Optionen der
+Integration einen anderen Ausgabeordner einstellst, z. B. `/notes`, trag ihn in
+`configuration.yaml` ein und starte Home Assistant neu:
+
+```yaml
+homeassistant:
+  media_dirs:
+    local: /media      # Standard behalten — diese Liste ersetzt ihn
+    notes: /notes
+```
+
+Die Integration findet dann für jede Seite selbst den passenden Medienordner; im
+Blueprint ist nichts einzustellen. Liegt eine Seite in keinem Medienordner, bricht die
+Automation mit einer Warnung im Log ab.

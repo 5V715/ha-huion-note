@@ -40,7 +40,7 @@ from .const import (
     STATUS_IDLE,
     STATUS_SYNCING,
 )
-from .pages import SavedPage, is_saved, page_digest, write_page
+from .pages import SavedPage, is_saved, media_content_id, page_digest, write_page
 from .protocol.codec import Page
 from .protocol.errors import AuthFailed, PinRequired, TransportClosed
 from .protocol.session import SyncSession
@@ -243,6 +243,10 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
                         "png": saved.png,
                         "svg": saved.svg,
                         "json": saved.json,
+                        # "" when the output folder is not a media folder
+                        "media_content_id": media_content_id(
+                            saved.png, self.hass.config.media_dirs
+                        ),
                     },
                 )
                 self.async_update_listeners()

@@ -25,8 +25,6 @@ from .protocol.frames import heart_beat
 
 _LOGGER = logging.getLogger(__name__)
 
-# 126-byte data values need ATT_MTU >= 129.
-MIN_MTU = 129
 DISCONNECT_TIMEOUT = 15  # seconds
 
 
@@ -49,12 +47,8 @@ class BleakTransport:
             # A failed attempt may have reported its own disconnect; this link is live.
             self._closed = self._dropped = False
             self._queue = asyncio.Queue()
-            mtu = self._client.mtu_size
-            if mtu < MIN_MTU:
-                _LOGGER.warning(
-                    "%s: negotiated MTU %s < %s; page packets may be truncated",
-                    self._device.address, mtu, MIN_MTU,
-                )
+            # No MTU check here: bleak's BlueZ backend only knows a placeholder
+            # (23) at this point. The session detects truncated packets instead.
             await self._client.start_notify(DATA_CHAR_UUID, self._on_value)
             await self._client.start_notify(CMD_CHAR_UUID, self._on_value)
         except (BleakError, asyncio.TimeoutError) as err:

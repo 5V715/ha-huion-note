@@ -117,11 +117,22 @@ async def _setup(hass: HomeAssistant, **inputs) -> None:
     await hass.async_block_till_done()
 
 
-async def _page(hass, png=PNG, strokes=5):
+_OLD = object()
+
+
+async def _page(hass, png=PNG, strokes=5, media_id=None):
+    """Fire huion_note_page_saved like the integration does: with the media link
+    for the page (default: derived from PNG's /media path); media_id=_OLD leaves it
+    out, as integration versions before it was added did."""
     done = async_capture_events(hass, "huion_note_page_transcribed")
-    hass.bus.async_fire("huion_note_page_saved", {
-        "page": 3, "strokes": strokes, "complete": True, "png": png,
-        "svg": png[:-3] + "svg", "json": png[:-3] + "json"})
+    data = {"page": 3, "strokes": strokes, "complete": True, "png": png,
+            "svg": png[:-3] + "svg", "json": png[:-3] + "json"}
+    if media_id is None:
+        media_id = ("media-source://media_source/local/" + png[len("/media/"):]
+                    if png.startswith("/media/") else "")
+    if media_id is not _OLD:
+        data["media_content_id"] = media_id
+    hass.bus.async_fire("huion_note_page_saved", data)
     await hass.async_block_till_done(wait_background_tasks=True)
     return done
 
@@ -264,6 +275,25 @@ async def test_pages_outside_the_media_folder_are_skipped(hass: HomeAssistant, f
     await _setup(hass)
     await _page(hass, png="/config/notes/p.png")
     assert not fakes.ai
+
+
+async def test_the_media_link_comes_from_the_integration(hass: HomeAssistant, fakes) -> None:
+    """Pages in the device's own output folder, e.g. /notes registered as media
+    folder "notes": the blueprint uses the link the integration resolved."""
+    fakes.reply = {"transcript": "Hi", "commands": []}
+    await _setup(hass)
+    await _page(hass, png="/notes/20261001T102031Z-page8-5e364b12.png",
+                media_id="media-source://media_source/notes/20261001T102031Z-page8-5e364b12.png")
+    assert fakes.ai[0].data["attachments"][0]["media_content_id"] == \
+        "media-source://media_source/notes/20261001T102031Z-page8-5e364b12.png"
+
+
+async def test_older_integrations_without_the_link_use_media(hass: HomeAssistant, fakes) -> None:
+    fakes.reply = {"transcript": "Hi", "commands": []}
+    await _setup(hass)
+    await _page(hass, media_id=_OLD)
+    assert fakes.ai[0].data["attachments"][0]["media_content_id"] == \
+        "media-source://media_source/local/huion_notes/20260930T063000Z-page3-3f9a1c2e.png"
 
 
 async def test_pages_without_strokes_are_skipped(hass: HomeAssistant, fakes) -> None:

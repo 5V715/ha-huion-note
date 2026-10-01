@@ -84,7 +84,9 @@ output folder, device PIN.
 
 **Events** — for automations (OCR, notify, copy to Nextcloud, …):
 
-- `huion_note_page_saved` — `{address, page, strokes, complete, png, svg, json}` per new page
+- `huion_note_page_saved` — `{address, page, strokes, complete, png, svg, json, media_content_id}`
+  per new page; `media_content_id` is the page's media-source link (empty if the output
+  folder is not a media folder)
 - `huion_note_sync_finished` — `{address, pages_on_tablet, new_pages, deleted, files}`
 
 ```yaml
@@ -115,7 +117,8 @@ Commands, examples and setup in English and German:
 
 For handwriting, choose **Claude Opus 5.5** (`claude-opus-5-5`) in the AI Task's
 settings — the integration's default model is small. Each page is one API request with
-one image; pages must be saved inside the media folder (the default).
+one image. The output folder must be a Home Assistant media folder — the default is;
+for your own folder, see [the guide](blueprints/automation/huion_note/README.md#own-output-folder).
 
 **Caveats**
 

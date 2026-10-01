@@ -43,6 +43,19 @@ class SavedPage:
         return self.base + ".json"
 
 
+def media_content_id(path: str, media_dirs: dict[str, str]) -> str:
+    """The media-source link for a file inside one of Home Assistant's media folders
+    (`media_dirs`: source name -> folder; the most specific folder wins), or "" if
+    the file is in none of them. AI Tasks and the media browser need this link."""
+    real = os.path.realpath(path)
+    best: tuple[int, str, str] | None = None
+    for name, folder in media_dirs.items():
+        root = os.path.realpath(folder)
+        if os.path.commonpath([real, root]) == root and (not best or len(root) > best[0]):
+            best = (len(root), name, os.path.relpath(real, root))
+    return f"media-source://media_source/{best[1]}/{best[2]}" if best else ""
+
+
 def page_digest(page: Page) -> str:
     """Content hash of every decoded point (index-independent: indices shift on delete)."""
     h = hashlib.sha256()

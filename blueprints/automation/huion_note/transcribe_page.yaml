@@ -20,7 +20,8 @@ blueprint:
     examples: https://github.com/5V715/ha-huion-note/tree/main/blueprints/automation/huion_note
 
 
-    Pages must be saved inside the media folder (the integration's default).
+    The integration's output folder must be a Home Assistant media folder — the
+    default `/media/huion_notes` is; for another folder see the guide.
   domain: automation
   source_url: https://github.com/5V715/ha-huion-note/blob/main/blueprints/automation/huion_note/transcribe_page.yaml
   input:
@@ -127,14 +128,6 @@ blueprint:
     output:
       name: Output
       input:
-        media_dir:
-          name: Media folder
-          description: >-
-            The folder Home Assistant serves as "My media" (`/media` on Home
-            Assistant OS).
-          default: /media
-          selector:
-            text:
         notify:
           name: Show a notification
           description: >-
@@ -165,7 +158,6 @@ conditions:
     value_template: "{{ trigger.event.data.strokes | int(0) > 0 }}"
 
 variables:
-  media_dir: !input media_dir
   language: !input language
   extra_instructions: !input extra_instructions
   show_notification: !input notify
@@ -182,10 +174,13 @@ variables:
   png: "{{ trigger.event.data.png }}"
   svg: "{{ trigger.event.data.svg }}"
   json: "{{ trigger.event.data.json }}"
-  media_root: "{{ media_dir.rstrip('/') ~ '/' }}"
+  # The integration resolves the page's media link from the device's output
+  # folder; integration versions before that only worked with /media.
   media_content_id: >-
-    {{ 'media-source://media_source/local/' ~ png[media_root | length:]
-       if png.startswith(media_root) else '' }}
+    {% set d = trigger.event.data %}
+    {% if 'media_content_id' in d %}{{ d.media_content_id }}
+    {% elif png.startswith('/media/') %}{{ 'media-source://media_source/local/' ~ png[7:] }}
+    {% endif %}
 
 actions:
   - if: "{{ media_content_id == '' }}"
@@ -195,9 +190,11 @@ actions:
           level: warning
           logger: blueprints.huion_note.transcribe_page
           message: >-
-            Huion Note page {{ page }} was saved outside the media folder
-            ({{ png }}); set the integration's output folder inside {{ media_dir }}.
-      - stop: Page is not in the media folder
+            Huion Note page {{ page }} ({{ png }}) is not in a Home Assistant media
+            folder, so the AI Task can't read it. Add its folder to
+            `homeassistant: media_dirs:` in configuration.yaml (keep `local: /media`
+            in the list) and restart Home Assistant.
+      - stop: Page is not in a media folder
 
   - action: ai_task.generate_data
     data:

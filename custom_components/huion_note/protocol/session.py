@@ -55,6 +55,7 @@ class SyncSession:
         self.page_timeout = page_timeout
         self.retransmit_timeout = retransmit_timeout
         self._last_command = 0.0
+        self._warned_truncated = False
         self.limits = codec.Limits()
         self.battery: Optional[int] = None
 
@@ -226,11 +227,22 @@ class SyncSession:
             fr = frames.parse_huion_frame(value)
             if not fr or fr.op != OrderCode.RETURN_OFFLINE_DATA:
                 continue
+            self._check_length(fr.raw)
             seq = codec.packet_seq(fr.raw)
             if 1 <= seq <= count:
                 _keep(got, bad, seq, fr.raw)
                 if seq == count:
                     return
+
+    def _check_length(self, raw: bytes) -> None:
+        """Byte 2 of a page packet is its own length (0x7e = 126). Shorter means the
+        link's MTU cut it — warn once per sync; the checksum rejects it anyway."""
+        if len(raw) < raw[2] and not self._warned_truncated:
+            self._warned_truncated = True
+            _LOGGER.warning(
+                "page packets arrive truncated (%d of %d bytes): the Bluetooth link's "
+                "MTU is too small", len(raw), raw[2],
+            )
 
     async def _fill_gaps(self, page: int, got: dict, bad: dict, count: int) -> None:
         """Re-request missing or corrupt packets via GET_PAGE_PACKAGE (0x88), one at
@@ -255,6 +267,7 @@ class SyncSession:
                     if not fr or len(fr.raw) < 6 or fr.raw[2] != 0x7E or fr.op not in (
                             OrderCode.GET_PAGE_PACKAGE, OrderCode.RETURN_OFFLINE_DATA):
                         continue
+                    self._check_length(fr.raw)
                     seq = codec.packet_seq(fr.raw)
                     if 1 <= seq <= count:
                         _keep(got, bad, seq, fr.raw)  # late stream packets count too

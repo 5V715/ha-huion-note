@@ -3,7 +3,7 @@ paired central: unpaired links are dropped at once, and a pairing the notebook h
 forgotten (e.g. after it paired with a phone) makes every connect time out."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from bleak.backends.device import BLEDevice
@@ -110,3 +110,15 @@ async def test_disconnect_from_a_failed_attempt_does_not_close_the_new_link():
         await t.send(b"\xcd\x81\x08\x00\x00\x00\x00\xed")
         await t.close()
     client.write_gatt_char.assert_awaited_once()
+
+
+async def test_connect_does_not_ask_bluez_for_the_mtu():
+    """bleak's BlueZ backend only reports a placeholder MTU of 23 (with a
+    UserWarning) unless it was acquired first: reading it caused false alarms."""
+    client = fake_client()
+    type(client).mtu_size = PropertyMock(side_effect=AssertionError("mtu_size read"))
+    connect, _, patches = patched([client])
+    with patches[0], patches[1], patches[2]:
+        t = BleakTransport(DEVICE)
+        await t.connect()
+        await t.close()

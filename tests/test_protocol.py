@@ -317,3 +317,11 @@ def test_media_content_id_uses_the_folder_the_page_is_in(tmp_path):
     # a folder that isn't a media folder (or only shares a name prefix) has no link
     assert media_content_id(str(tmp_path / "notes2" / "p.png"), dirs) == ""
     assert media_content_id("/elsewhere/p.png", dirs) == ""
+
+
+async def test_truncated_packets_are_reported_once(caplog):
+    """A packet shorter than its own length byte was cut by a too-small MTU."""
+    cut = p87(1)[:20]
+    t = FakeTablet(handshake(pages=0) + [count(2), cut, p87(2)[:20]], retransmits=False)
+    await run(SyncSession(t, idle_timeout=0.01, max_pages=1, retransmit_timeout=0.01), [])
+    assert sum("truncated" in r.message for r in caplog.records) == 1

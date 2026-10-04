@@ -22,7 +22,10 @@ from datetime import datetime, timezone
 from .protocol import render
 from .protocol.codec import Page
 
-_EXTS = (".svg", ".json", ".png")
+_EXTS = (".svg", ".json", ".png", ".pdf")
+# What must be on disk before the tablet's copy may be deleted. The PDF is written
+# too, but pages saved before PDFs existed don't have one and needn't be re-saved.
+_REQUIRED = (".svg", ".json", ".png")
 
 
 @dataclass
@@ -41,6 +44,10 @@ class SavedPage:
     @property
     def json(self) -> str:
         return self.base + ".json"
+
+    @property
+    def pdf(self) -> str:
+        return self.base + ".pdf"
 
 
 def media_content_id(path: str, media_dirs: dict[str, str]) -> str:
@@ -64,17 +71,24 @@ def page_digest(page: Page) -> str:
     return h.hexdigest()
 
 
-def write_page(page: Page, out_dir: str, when: datetime, digest: str) -> SavedPage:
-    """Write <UTC stamp>-page<N>-<digest8>.{svg,json,png} without overwriting anything."""
+def write_page(
+    page: Page,
+    out_dir: str,
+    when: datetime,
+    digest: str,
+    line_width_mm: float = render.DEFAULT_LINE_WIDTH_MM,
+) -> SavedPage:
+    """Write <UTC stamp>-page<N>-<digest8>.{svg,json,pdf,png} without overwriting anything."""
     os.makedirs(out_dir, exist_ok=True)
     stamp = when.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     stem = os.path.join(out_dir, f"{stamp}-page{page.index + 1}-{digest[:8]}")
     base, n = stem, 1
     while any(os.path.lexists(base + ext) for ext in _EXTS):
         base, n = f"{stem}-{n}", n + 1
-    _write_new(base + ".svg", render.render_svg(page).encode())
+    _write_new(base + ".svg", render.render_svg(page, full_width_mm=line_width_mm).encode())
     _write_new(base + ".json", render.render_json(page).encode())
-    _write_new(base + ".png", render.render_png(page))
+    _write_new(base + ".pdf", render.render_pdf(page, full_width_mm=line_width_mm))
+    _write_new(base + ".png", render.render_png(page, full_width_mm=line_width_mm))
     _fsync_dir(out_dir)
     return SavedPage(base=base, digest=digest)
 
@@ -82,7 +96,7 @@ def write_page(page: Page, out_dir: str, when: datetime, digest: str) -> SavedPa
 def is_saved(base: str) -> bool:
     """Gate for deleting a page from the tablet: every file exists and is non-empty."""
     return all(
-        os.path.isfile(base + ext) and os.path.getsize(base + ext) > 0 for ext in _EXTS
+        os.path.isfile(base + ext) and os.path.getsize(base + ext) > 0 for ext in _REQUIRED
     )
 
 

@@ -40,11 +40,13 @@
           "delete_after_sync": "Delete pages from the notebook after they are saved",
           "cooldown": "Minutes between automatic syncs",
           "output_dir": "Folder for saved pages",
-          "pin": "Device PIN (6 digits, only if set on the notebook)"
+          "pin": "Device PIN (6 digits, only if set on the notebook)",
+          "line_width": "Line width (mm)"
         },
         "data_description": {
           "delete_after_sync": "Only complete pages with strokes whose SVG, JSON and PNG are safely on disk are deleted. The current (last) page is always kept.",
-          "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser."
+          "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser.",
+          "line_width": "Pen line width at full pressure in the PNG, PDF and SVG; lighter strokes are drawn thinner. 0.3 is a fine ballpoint. Applies to pages saved from now on."
         }
       }
     },

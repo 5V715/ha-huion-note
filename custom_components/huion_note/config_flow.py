@@ -29,12 +29,14 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_COOLDOWN,
     CONF_DELETE_AFTER_SYNC,
+    CONF_LINE_WIDTH,
     CONF_OUTPUT_DIR,
     CONF_PIN,
     DEFAULT_COOLDOWN,
     DOMAIN,
 )
 from .coordinator import default_output_dir
+from .protocol.render import DEFAULT_LINE_WIDTH_MM
 
 
 DEFAULT_NAME = "Huion Note X10"
@@ -214,6 +216,10 @@ class HuionNoteOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_COOLDOWN, default=opts.get(CONF_COOLDOWN, DEFAULT_COOLDOWN)
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+                vol.Optional(
+                    CONF_LINE_WIDTH,
+                    default=opts.get(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH_MM),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=2.0)),
                 vol.Optional(
                     CONF_OUTPUT_DIR,
                     default=opts.get(CONF_OUTPUT_DIR) or default_output_dir(self.hass),

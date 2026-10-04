@@ -193,6 +193,7 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
     assert tablet.connected and tablet.closed
     assert len(saved_events) == 2
     assert all(os.path.isfile(e.data["png"]) for e in saved_events)
+    assert all(open(e.data["pdf"], "rb").read().startswith(b"%PDF") for e in saved_events)
     # a ready-made media link for the AI Task, matching the folder the page is in
     assert all(e.data["media_content_id"] == "media-source://media_source/notes/"
                + os.path.basename(e.data["png"]) for e in saved_events)
@@ -464,3 +465,18 @@ async def test_removing_entry_clears_issue_and_storage(
     await hass.async_block_till_done()
     assert issue_registry.async_get_issue(DOMAIN, f"auth_failed_{entry.entry_id}") is None
     assert _store_key(entry) not in hass_storage
+
+
+async def test_line_width_option_reaches_saved_files(hass: HomeAssistant, tmp_path) -> None:
+    widths = {}
+    for mm in (0.2, 0.8):
+        out = tmp_path / str(mm)
+        entry = await _setup(hass, out, line_width=mm)
+        events = async_capture_events(hass, EVENT_PAGE_SAVED)
+        t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+        with t_patch, d_patch:
+            assert await entry.runtime_data.async_sync()
+        svg = open(events[0].data["svg"]).read()
+        widths[mm] = float(svg.split('stroke-width="')[1].split('"')[0])
+        assert await hass.config_entries.async_remove(entry.entry_id)
+    assert widths[0.8] == pytest.approx(4 * widths[0.2], abs=0.05)

@@ -7,7 +7,7 @@
 Pull the pages you write on a Huion Note X10 into Home Assistant — **no Huion app, no
 cloud.** Whenever the notebook comes into range of a Home Assistant Bluetooth adapter or
 [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html), its stored
-pages are downloaded, decoded and saved to your media folder as PNG + SVG + JSON
+pages are downloaded, decoded and saved to your media folder as PDF + PNG + SVG + JSON
 (ordered points + pressure — ready for handwriting recognition). No button to press.
 
 The offline-sync protocol was reverse-engineered from Huion's desktop drivers (Ghidra),
@@ -64,11 +64,15 @@ After setup only the address is used, so the name no longer matters.
    (checksum). If the notebook wants a PIN, or rejects the one you set,
    automatic syncs pause and a repair issue appears under *Settings → Repairs*;
    saving the PIN in the options resumes them.
-3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,png}` (e.g.
+3. Each page is written as `<UTC time>-page<N>-<id>.{svg,json,pdf,png}` (e.g.
    `20260929T063000Z-page1-3f9a1c2e.png`) to `<media>/huion_notes/` (so it shows up
    under *Media → My media*), unless you set another folder. Existing files are never
-   overwritten. The JSON holds the strokes plus every raw point (dots and pen-up
-   points included). Pages are identified by a hash of all their points, so pages
+   overwritten. The PDF is vector, drawn straight from the stroke data at the
+   notebook's real size (about 141 × 187 mm), so it stays sharp at any zoom and
+   prints 1:1. Lines are drawn like a fine ballpoint: the *Line width* option sets
+   the width at full pressure (default 0.3 mm) and lighter strokes taper to 40 % of
+   it, in the PDF, PNG and SVG alike. The JSON holds the strokes plus every raw point
+   (dots and pen-up points included). Pages are identified by a hash of all their points, so pages
    still stored on the notebook are **not** saved again on the next sync; if their
    files have gone missing they are saved again. A page you kept writing on is saved
    as a new version.
@@ -78,7 +82,8 @@ After setup only the address is used, so the name no longer matters.
    deleted, because you may still be writing on it.
 
 **Options** (*Configure* on the integration): delete pages after sync, cooldown minutes,
-output folder, device PIN.
+line width (mm), output folder, device PIN. A new line width applies to pages saved
+from then on.
 
 **Entities**
 
@@ -93,7 +98,7 @@ output folder, device PIN.
 
 **Events** — for automations (OCR, notify, copy to Nextcloud, …):
 
-- `huion_note_page_saved` — `{address, page, strokes, complete, png, svg, json, media_content_id}`
+- `huion_note_page_saved` — `{address, page, strokes, complete, png, svg, json, pdf, media_content_id}`
   per new page; `media_content_id` is the page's media-source link (empty if the output
   folder is not a media folder)
 - `huion_note_sync_finished` — `{address, pages_on_tablet, new_pages, deleted, files}`

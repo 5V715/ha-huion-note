@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_COOLDOWN,
     CONF_DELETE_AFTER_SYNC,
+    CONF_LINE_WIDTH,
     CONF_OUTPUT_DIR,
     CONF_PIN,
     DEFAULT_COOLDOWN,
@@ -42,6 +43,7 @@ from .const import (
 )
 from .pages import SavedPage, is_saved, media_content_id, page_digest, write_page
 from .protocol.codec import Page
+from .protocol.render import DEFAULT_LINE_WIDTH_MM
 from .protocol.errors import AuthFailed, PinRequired, TransportClosed
 from .protocol.session import SyncSession
 from .transport import BleakTransport
@@ -223,7 +225,8 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
                         "saving it again", page.index + 1, base,
                     )
                 saved = await self.hass.async_add_executor_job(
-                    write_page, page, out_dir, started, digest
+                    write_page, page, out_dir, started, digest,
+                    self._opts.get(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH_MM),
                 )
                 if not await self.hass.async_add_executor_job(is_saved, saved.base):
                     _LOGGER.warning("page %d: files not confirmed on disk — kept on tablet",
@@ -243,6 +246,7 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
                         "png": saved.png,
                         "svg": saved.svg,
                         "json": saved.json,
+                        "pdf": saved.pdf,
                         # "" when the output folder is not a media folder
                         "media_content_id": media_content_id(
                             saved.png, self.hass.config.media_dirs

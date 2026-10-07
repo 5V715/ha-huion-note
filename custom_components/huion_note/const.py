@@ -11,6 +11,7 @@ CONF_PIN = "pin"
 CONF_DELETE_AFTER_SYNC = "delete_after_sync"
 CONF_COOLDOWN = "cooldown"
 CONF_OUTPUT_DIR = "output_dir"
+CONF_LINE_WIDTH = "line_width"  # mm at full pen pressure
 
 DEFAULT_COOLDOWN = 5  # minutes between automatic syncs after a successful one
 FAILURE_BACKOFF = 60  # seconds before an automatic retry after a failed sync

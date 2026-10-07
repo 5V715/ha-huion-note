@@ -3,19 +3,34 @@
     "flow_title": "{name}",
     "step": {
       "user": {
+        "description": "Home Assistant can see these Huion notebooks. Pick one, or enter a Bluetooth address.",
+        "menu_options": {
+          "pick_device": "Pick a discovered notebook",
+          "manual": "Enter a Bluetooth address"
+        }
+      },
+      "bluetooth_confirm": {
+        "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
+      },
+      "pick_device": {
         "description": "Pick the notebook. It must be awake and in range of a Bluetooth adapter or proxy.",
         "data": {
           "address": "Device"
         }
       },
-      "bluetooth_confirm": {
-        "description": "Set up {name}? Handwritten pages will be pulled automatically whenever Home Assistant sees the notebook."
+      "manual": {
+        "description": "Enter the notebook's Bluetooth address (e.g. `AA:BB:CC:DD:EE:FF`), or pick it from the nearby devices listed (strongest signal first; wake the notebook and it should be near the top). The notebook doesn't have to be in range now — pages sync the next time Home Assistant sees it.",
+        "data": {
+          "address": "Bluetooth address"
+        }
       }
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "no_devices_found": "No Huion notebook found nearby. Wake it up and try again.",
       "not_supported": "Device not supported"
+    },
+    "error": {
+      "invalid_address": "Enter a Bluetooth address like AA:BB:CC:DD:EE:FF."
     }
   },
   "options": {
@@ -25,11 +40,13 @@
           "delete_after_sync": "Delete pages from the notebook after they are saved",
           "cooldown": "Minutes between automatic syncs",
           "output_dir": "Folder for saved pages",
-          "pin": "Device PIN (6 digits, only if set on the notebook)"
+          "pin": "Device PIN (6 digits, only if set on the notebook)",
+          "line_width": "Line width (mm)"
         },
         "data_description": {
           "delete_after_sync": "Only complete pages with strokes whose SVG, JSON and PNG are safely on disk are deleted. The current (last) page is always kept.",
-          "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser."
+          "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser.",
+          "line_width": "Pen line width at full pressure in the PNG, PDF and SVG; lighter strokes are drawn thinner. 0.3 is a fine ballpoint. Applies to pages saved from now on."
         }
       }
     },

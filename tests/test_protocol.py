@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import re
+import zlib
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -99,6 +101,23 @@ def test_write_page_and_digest(tmp_path):
     assert page_digest(_page(index=0)) == digest
 
 
+def test_write_page_writes_pdf_with_chosen_line_width(tmp_path):
+    page = _page()
+    digest = page_digest(page)
+    thin = write_page(page, str(tmp_path / "thin"), WHEN, digest, line_width_mm=0.2)
+    thick = write_page(page, str(tmp_path / "thick"), WHEN, digest, line_width_mm=0.8)
+    assert open(thin.pdf, "rb").read().startswith(b"%PDF")
+    width = lambda saved: float(re.search(r'stroke-width="([0-9.]+)"', open(saved.svg).read())[1])
+    assert width(thick) == pytest.approx(4 * width(thin), abs=0.05)  # 2-decimal rounding
+
+
+def test_page_saved_before_pdfs_existed_still_counts_as_saved(tmp_path):
+    page = _page()
+    saved = write_page(page, str(tmp_path), WHEN, page_digest(page))
+    os.remove(saved.pdf)
+    assert is_saved(saved.base)  # no needless re-save of older pages
+
+
 def test_write_page_never_overwrites(tmp_path):
     page = _page()
     digest = page_digest(page)
@@ -120,13 +139,63 @@ def test_digest_covers_dots_and_pen_up_points():
     assert page_digest(a) != page_digest(b)
 
 
+def test_line_width_tapers_with_pressure():
+    page = _page()
+    full = codec.StylusPoint(0, 0, 8191, True)
+    light = codec.StylusPoint(0, 0, 0, True)
+    assert render.line_width_mm(page, full, 0.3) == pytest.approx(0.3)
+    assert render.line_width_mm(page, light, 0.3) == pytest.approx(0.3 * render.MIN_PRESSURE_FACTOR)
+
+
 def test_svg_output():
-    # Same bytes the original huion_notes CLI renderer produced for this page.
-    assert render.render_svg(_page()) == (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1190" '
-        'style="background:#fff"><path d="M18.1,21.2 L21.2,27.4 L24.3,33.6 L27.3,39.8" '
-        'fill="none" stroke="#111" stroke-width="2.5"/></svg>'
-    )
+    svg = render.render_svg(_page())
+    # keeps the notebook's aspect ratio (28200 x 37400) inside a 15 px margin
+    assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1184" ')
+    # same scale on both axes now (the old renderer stretched y by ~0.5 %)
+    assert '<path d="M18.1,21.2 L21.2,27.3 L24.3,33.5 L27.3,39.7" ' in svg
+    # 0.3 mm at ~49 % pressure, ~6.2 px/mm  ->  ~1.3 px (was a fixed 2.5 px)
+    width = float(re.search(r'stroke-width="([0-9.]+)"', svg).group(1))
+    px_per_mm = (900 - 30) / 28200 * render.UNITS_PER_MM
+    assert width == pytest.approx(render.line_width_mm(_page(), _page().strokes[0][0], 0.3)
+                                  * px_per_mm, abs=0.01)
+    thicker = render.render_svg(_page(), full_width_mm=0.6)
+    assert float(re.search(r'stroke-width="([0-9.]+)"', thicker).group(1)) == pytest.approx(
+        2 * width, abs=0.02)
+
+
+def _pdf_objects(pdf: bytes) -> dict[int, bytes]:
+    """Check the xref table points at every object; return {number: body}."""
+    xref = int(pdf.rsplit(b"startxref\n", 1)[1].split(b"\n")[0])
+    lines = pdf[xref:].split(b"\n")
+    assert lines[0] == b"xref"
+    count = int(lines[1].split()[1])
+    objs = {}
+    for i in range(1, count):
+        off = int(lines[2 + i].split()[0])
+        assert pdf[off:].startswith(f"{i} 0 obj\n".encode()), f"xref offset wrong for {i}"
+        objs[i] = pdf[off:pdf.index(b"endobj", off)]
+    return objs
+
+
+def test_pdf_is_vector_at_real_size():
+    page = _page()
+    pdf = render.render_pdf(page)
+    assert pdf.startswith(b"%PDF-1.4") and pdf.rstrip().endswith(b"%%EOF")
+    objs = _pdf_objects(pdf)
+    # 28200 x 37400 units at 5080 lpi = 141 x 187 mm = 399.69 x 530.08 pt
+    assert b"/MediaBox [0 0 399.69 530.08]" in objs[3]
+    stream = objs[4].split(b"stream\n", 1)[1].rsplit(b"\nendstream", 1)[0]
+    ops = zlib.decompress(stream).decode()
+    assert ops.startswith("1 J 1 j ")          # round caps and joins
+    # first point (100, 200) -> x 1.42 pt, y flipped from the top: 530.08 - 2.83
+    assert "1.42 527.24 m" in ops
+    assert ops.count(" l") == 3 and ops.rstrip().endswith("S")
+
+
+def test_pdf_with_no_strokes_is_a_blank_page():
+    page = codec.decode_page([], codec.Limits(), 0)
+    objs = _pdf_objects(render.render_pdf(page))
+    assert b"/MediaBox" in objs[3]
 
 
 async def test_trusts_page_count_beyond_64():

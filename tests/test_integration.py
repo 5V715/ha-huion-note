@@ -60,12 +60,87 @@ async def test_bluetooth_discovery_flow(hass: HomeAssistant) -> None:
     assert result["data"] == {CONF_ADDRESS: ADDRESS}
 
 
-async def test_user_flow_no_devices(hass: HomeAssistant) -> None:
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
+def _nearby(*infos):
+    return patch(
+        "custom_components.huion_note.config_flow.async_discovered_service_info",
+        return_value=list(infos),
     )
+
+
+async def test_user_flow_without_named_devices_goes_to_manual(hass: HomeAssistant) -> None:
+    unnamed = service_info(name=ADDRESS)  # HA uses the address when there's no name
+    with _nearby(unnamed):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "manual"
+    # the unnamed notebook is offered in the dropdown
+    [field] = result["data_schema"].schema
+    options = result["data_schema"].schema[field].config["options"]
+    assert options[0]["value"] == ADDRESS
+    assert "no name" in options[0]["label"]
+
+
+@pytest.mark.parametrize(
+    "typed", ["aa:bb:cc:dd:ee:ff", "AA-BB-CC-DD-EE-FF", " aabbccddeeff ", ADDRESS]
+)
+async def test_manual_address_creates_entry(hass: HomeAssistant, typed) -> None:
+    with _nearby():
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+    with patch("custom_components.huion_note.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADDRESS: typed}
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_ADDRESS: ADDRESS}
+    assert result["title"] == "Huion Note X10"
+    assert result["result"].unique_id == ADDRESS
+
+
+async def test_manual_address_rejects_garbage(hass: HomeAssistant) -> None:
+    with _nearby():
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADDRESS: "Huion Note-X10"}
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_ADDRESS: "invalid_address"}
+
+
+async def test_manual_address_already_configured(hass: HomeAssistant) -> None:
+    MockConfigEntry(domain=DOMAIN, unique_id=ADDRESS, data={CONF_ADDRESS: ADDRESS}).add_to_hass(hass)
+    with _nearby():
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADDRESS: ADDRESS.lower()}
+        )
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "no_devices_found"
+    assert result["reason"] == "already_configured"
+
+
+async def test_user_flow_menu_when_named_notebook_seen(hass: HomeAssistant) -> None:
+    with _nearby(service_info()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        assert result["type"] is FlowResultType.MENU
+        assert result["menu_options"] == ["pick_device", "manual"]
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"next_step_id": "pick_device"}
+        )
+        with patch("custom_components.huion_note.async_setup_entry", return_value=True):
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {CONF_ADDRESS: ADDRESS}
+            )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Huion Note-X10"
 
 
 async def test_options_flow_rejects_bad_pin(hass: HomeAssistant, tmp_path) -> None:
@@ -118,6 +193,7 @@ async def test_advertisement_triggers_sync(hass: HomeAssistant, tmp_path) -> Non
     assert tablet.connected and tablet.closed
     assert len(saved_events) == 2
     assert all(os.path.isfile(e.data["png"]) for e in saved_events)
+    assert all(open(e.data["pdf"], "rb").read().startswith(b"%PDF") for e in saved_events)
     # a ready-made media link for the AI Task, matching the folder the page is in
     assert all(e.data["media_content_id"] == "media-source://media_source/notes/"
                + os.path.basename(e.data["png"]) for e in saved_events)
@@ -389,3 +465,18 @@ async def test_removing_entry_clears_issue_and_storage(
     await hass.async_block_till_done()
     assert issue_registry.async_get_issue(DOMAIN, f"auth_failed_{entry.entry_id}") is None
     assert _store_key(entry) not in hass_storage
+
+
+async def test_line_width_option_reaches_saved_files(hass: HomeAssistant, tmp_path) -> None:
+    widths = {}
+    for mm in (0.2, 0.8):
+        out = tmp_path / str(mm)
+        entry = await _setup(hass, out, line_width=mm)
+        events = async_capture_events(hass, EVENT_PAGE_SAVED)
+        t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+        with t_patch, d_patch:
+            assert await entry.runtime_data.async_sync()
+        svg = open(events[0].data["svg"]).read()
+        widths[mm] = float(svg.split('stroke-width="')[1].split('"')[0])
+        assert await hass.config_entries.async_remove(entry.entry_id)
+    assert widths[0.8] == pytest.approx(4 * widths[0.2], abs=0.05)

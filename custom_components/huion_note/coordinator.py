@@ -29,6 +29,7 @@ from .const import (
     CONF_COOLDOWN,
     CONF_DELETE_AFTER_SYNC,
     CONF_LINE_WIDTH,
+    CONF_PRESSURE_EFFECT,
     CONF_OUTPUT_DIR,
     CONF_PIN,
     DEFAULT_COOLDOWN,
@@ -227,6 +228,7 @@ class HuionNoteCoordinator(DataUpdateCoordinator[HuionNoteData]):
                 saved = await self.hass.async_add_executor_job(
                     write_page, page, out_dir, started, digest,
                     self._opts.get(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH_MM),
+                    self._opts.get(CONF_PRESSURE_EFFECT, 100) / 100,
                 )
                 if not await self.hass.async_add_executor_job(is_saved, saved.base):
                     _LOGGER.warning("page %d: files not confirmed on disk — kept on tablet",

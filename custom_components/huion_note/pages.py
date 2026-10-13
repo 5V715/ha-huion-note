@@ -77,6 +77,7 @@ def write_page(
     when: datetime,
     digest: str,
     line_width_mm: float = render.DEFAULT_LINE_WIDTH_MM,
+    pressure_effect: float = render.DEFAULT_PRESSURE_EFFECT,
 ) -> SavedPage:
     """Write <UTC stamp>-page<N>-<digest8>.{svg,json,pdf,png} without overwriting anything."""
     os.makedirs(out_dir, exist_ok=True)
@@ -85,10 +86,11 @@ def write_page(
     base, n = stem, 1
     while any(os.path.lexists(base + ext) for ext in _EXTS):
         base, n = f"{stem}-{n}", n + 1
-    _write_new(base + ".svg", render.render_svg(page, full_width_mm=line_width_mm).encode())
+    pen = {"full_width_mm": line_width_mm, "pressure_effect": pressure_effect}
+    _write_new(base + ".svg", render.render_svg(page, **pen).encode())
     _write_new(base + ".json", render.render_json(page).encode())
-    _write_new(base + ".pdf", render.render_pdf(page, full_width_mm=line_width_mm))
-    _write_new(base + ".png", render.render_png(page, full_width_mm=line_width_mm))
+    _write_new(base + ".pdf", render.render_pdf(page, **pen))
+    _write_new(base + ".png", render.render_png(page, **pen))
     _fsync_dir(out_dir)
     return SavedPage(base=base, digest=digest)
 

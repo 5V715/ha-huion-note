@@ -480,3 +480,16 @@ async def test_line_width_option_reaches_saved_files(hass: HomeAssistant, tmp_pa
         widths[mm] = float(svg.split('stroke-width="')[1].split('"')[0])
         assert await hass.config_entries.async_remove(entry.entry_id)
     assert widths[0.8] == pytest.approx(4 * widths[0.2], abs=0.05)
+
+
+async def test_pressure_effect_option_is_passed_to_write_page(hass: HomeAssistant, tmp_path) -> None:
+    from custom_components.huion_note import pages
+
+    entry = await _setup(hass, tmp_path, pressure_effect=40)
+    with patch("custom_components.huion_note.coordinator.write_page",
+               wraps=pages.write_page) as wp:
+        t_patch, d_patch = _patch_tablet(FakeTablet(THREE_PAGES))
+        with t_patch, d_patch:
+            assert await entry.runtime_data.async_sync()
+    assert wp.call_count == 3
+    assert wp.call_args.args[-1] == pytest.approx(0.4)

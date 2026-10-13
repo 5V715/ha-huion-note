@@ -394,3 +394,57 @@ async def test_truncated_packets_are_reported_once(caplog):
     t = FakeTablet(handshake(pages=0) + [count(2), cut, p87(2)[:20]], retransmits=False)
     await run(SyncSession(t, idle_timeout=0.01, max_pages=1, retransmit_timeout=0.01), [])
     assert sum("truncated" in r.message for r in caplog.records) == 1
+
+
+def _varied_page():
+    """One stroke whose pressure ramps from 10 % to 90 % of the range."""
+    pts = [codec.StylusPoint(100 * i, 100 * i, int(8191 * (0.1 + 0.8 * i / 99)), True)
+           for i in range(100)]
+    return codec.Page(index=0, max_x=28200.0, max_y=37400.0, max_press=8191.0,
+                      strokes=[pts], points=pts)
+
+
+def test_pressure_range_is_the_pages_own_band():
+    lo, hi = render.pressure_range(_varied_page())
+    assert lo == pytest.approx(8191 * 0.14, rel=0.02)   # 5th percentile
+    assert hi == pytest.approx(8191 * 0.86, rel=0.02)   # 95th percentile
+    # a uniform page falls back to the pen's full scale (no noise amplification)
+    assert render.pressure_range(_page()) == (0.0, 8191.0)
+
+
+def test_light_strokes_taper_to_15_percent_and_effect_scales_it():
+    page = _varied_page()
+    rng = render.pressure_range(page)
+    light, heavy = page.strokes[0][0], page.strokes[0][-1]
+    assert render.line_width_mm(page, light, 0.3, rng) == pytest.approx(0.3 * 0.15)
+    assert render.line_width_mm(page, heavy, 0.3, rng) == pytest.approx(0.3)
+    # 50 % effect: lightest at 57.5 %; 0 %: uniform
+    assert render.line_width_mm(page, light, 0.3, rng, 0.5) == pytest.approx(0.3 * 0.575)
+    assert render.line_width_mm(page, light, 0.3, rng, 0.0) == pytest.approx(0.3)
+
+
+def test_widths_are_smoothed_along_the_stroke():
+    pts = [codec.StylusPoint(10 * i, 0, 4000, True) for i in range(11)]
+    pts[5] = codec.StylusPoint(50, 0, 8191, True)        # one-point pressure spike
+    page = codec.Page(0, 28200.0, 37400.0, 8191.0, [pts], points=pts)
+    rng = (0.0, 8191.0)
+    raw = render.line_width_mm(page, pts[5], 0.3, rng)
+    smooth = render.stroke_widths_mm(page, pts, 0.3, rng)
+    assert smooth[5] < raw and smooth[0] == pytest.approx(
+        render.line_width_mm(page, pts[0], 0.3, rng))
+
+
+def test_pressure_effect_reaches_every_format(tmp_path):
+    page = _varied_page()
+    digest = page_digest(page)
+    flat = write_page(page, str(tmp_path / "flat"), WHEN, digest, 0.3, pressure_effect=0.0)
+    tapered = write_page(page, str(tmp_path / "taper"), WHEN, digest, 0.3, pressure_effect=1.0)
+    svg_w = lambda saved: float(re.search(r'stroke-width="([0-9.]+)"', open(saved.svg).read())[1])
+    assert svg_w(tapered) < svg_w(flat)
+    pdf_widths = lambda saved: {
+        line.split(" w ")[0]
+        for line in zlib.decompress(
+            open(saved.pdf, "rb").read().split(b"stream\n", 1)[1].rsplit(b"\nendstream", 1)[0]
+        ).decode().splitlines() if " w " in line}
+    assert len(pdf_widths(flat)) == 1 and len(pdf_widths(tapered)) > 10
+    assert open(flat.png, "rb").read() != open(tapered.png, "rb").read()

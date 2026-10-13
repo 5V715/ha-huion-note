@@ -69,10 +69,13 @@ After setup only the address is used, so the name no longer matters.
    under *Media → My media*), unless you set another folder. Existing files are never
    overwritten. The PDF is vector, drawn straight from the stroke data at the
    notebook's real size (about 141 × 187 mm), so it stays sharp at any zoom and
-   prints 1:1. Lines are drawn like a fine ballpoint: the *Line width* option sets
-   the width at full pressure (default 0.3 mm) and lighter strokes taper to 40 % of
-   it, in the PDF, PNG and SVG alike. The JSON holds the strokes plus every raw point
-   (dots and pen-up points included). Pages are identified by a hash of all their points, so pages
+   prints 1:1. Line width follows pen pressure, in the PDF, PNG and SVG alike: the
+   *Line width* option sets the width of your heaviest strokes (default 0.3 mm;
+   about 0.45 mm gives bolder outlines) and the lightest taper to 15 % of it, so
+   light hatching stays delicate. Pressure is read relative to each page (its own
+   light-to-heavy range), and *Pressure effect* tones the taper down (0 % = uniform
+   lines). The JSON holds the strokes plus every raw point, with its pressure (dots
+   and pen-up points included). Pages are identified by a hash of all their points, so pages
    still stored on the notebook are **not** saved again on the next sync; if their
    files have gone missing they are saved again. A page you kept writing on is saved
    as a new version.
@@ -82,8 +85,8 @@ After setup only the address is used, so the name no longer matters.
    deleted, because you may still be writing on it.
 
 **Options** (*Configure* on the integration): delete pages after sync, cooldown minutes,
-line width (mm), output folder, device PIN. A new line width applies to pages saved
-from then on.
+line width (mm), pressure effect (%), output folder, device PIN. New line settings
+apply to pages saved from then on.
 
 **Entities**
 

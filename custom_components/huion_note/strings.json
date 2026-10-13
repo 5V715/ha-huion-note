@@ -41,12 +41,14 @@
           "cooldown": "Minutes between automatic syncs",
           "output_dir": "Folder for saved pages",
           "pin": "Device PIN (6 digits, only if set on the notebook)",
-          "line_width": "Line width (mm)"
+          "line_width": "Line width (mm)",
+          "pressure_effect": "Pressure effect (%)"
         },
         "data_description": {
           "delete_after_sync": "Only complete pages with strokes whose SVG, JSON and PNG are safely on disk are deleted. The current (last) page is always kept.",
           "output_dir": "Defaults to huion_notes in your media folder, so pages show up in the Media browser.",
-          "line_width": "Pen line width at full pressure in the PNG, PDF and SVG; lighter strokes are drawn thinner. 0.3 is a fine ballpoint. Applies to pages saved from now on."
+          "line_width": "Pen line width at your heaviest pressure in the PNG, PDF and SVG; lighter strokes are drawn thinner. 0.3 is a fine pen; 0.45 gives bolder outlines. Applies to pages saved from now on.",
+          "pressure_effect": "How much pen pressure changes the line width: 100 = lightest strokes at 15 % of the line width, 0 = all lines the same width. Pressure is read relative to each page."
         }
       }
     },

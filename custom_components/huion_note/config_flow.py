@@ -30,6 +30,7 @@ from .const import (
     CONF_COOLDOWN,
     CONF_DELETE_AFTER_SYNC,
     CONF_LINE_WIDTH,
+    CONF_PRESSURE_EFFECT,
     CONF_OUTPUT_DIR,
     CONF_PIN,
     DEFAULT_COOLDOWN,
@@ -220,6 +221,10 @@ class HuionNoteOptionsFlow(OptionsFlow):
                     CONF_LINE_WIDTH,
                     default=opts.get(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH_MM),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.05, max=2.0)),
+                vol.Optional(
+                    CONF_PRESSURE_EFFECT,
+                    default=opts.get(CONF_PRESSURE_EFFECT, 100),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
                 vol.Optional(
                     CONF_OUTPUT_DIR,
                     default=opts.get(CONF_OUTPUT_DIR) or default_output_dir(self.hass),
